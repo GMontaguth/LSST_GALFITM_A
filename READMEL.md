@@ -1,360 +1,391 @@
-# procesar_muestra.py y corregir_ext_kcor.py
+# Pipeline GalfitM + statmorph + bulbo/disco — LSST DP2 (z < 0.1)
 
-Selección de una muestra confiable de galaxias a partir de ajustes multibanda de
-**GalfitM** sobre imágenes de **LSST**, validados contra el catálogo de LSST
-(Sérsic de MultiProFit) y contra las propias imágenes.
+Desde la descarga de las imágenes en el RSP (paso 0) hasta la medición no
+paramétrica con **statmorph** y la descomposición **bulbo + disco** con GalfitM,
+para galaxias con redshift espectroscópico a z < 0.1.
 
-El script reúne en un solo archivo tres etapas del análisis:
-
-| Paso | Qué hace | Entrada | Salida principal |
-|------|----------|---------|------------------|
-| **2** | Cortes de calidad de GalfitM | `galfitm_resultados.csv` | `analisis_galfitm/galfitm_limpio.csv` |
-| **3** | Cruce (*crossmatch*) con el catálogo LSST | `galfitm_limpio.csv` + parquet LSST | `analisis_galfitm/crossmatch/galfitm_x_lsst.csv` |
-| **4** | Clasificación de confiabilidad A/B/C/D | `galfitm_x_lsst.csv` + FITS de GalfitM | `analisis_galfitm/muestra/muestra_clasificada.csv` |
-
-Después, `corregir_ext_kcor.py` corrige las magnitudes de esa muestra por
-extinción galáctica y corrección K, y calcula magnitudes absolutas, colores en
-reposo y masa estelar (ver la [sección correspondiente](#corregir_ext_kcorpy--extinción-corrección-k-y-masa-estelar)).
+El pipeline está pensado para trabajar **por partes**: las galaxias se descargan
+por lotes, se agrupan en carpetas de trabajo (`galaxias_1_9`, `galaxias_10_22`...)
+y cada vez que se suma una carpeta, un solo comando (`actualizar_todo.py`) corre
+**solo lo que falta**.
 
 ---
 
-## Contexto: el pipeline completo
+## Resumen
 
-```
-correr_galfitm.sh          ->  ajusta GalfitM a cada galaxia (*_galfitm_out.fits)
-leer_output_galfitm.py     ->  paso 1: lee los FITS y crea galfitm_resultados.csv
-procesar_muestra.py        ->  pasos 2, 3 y 4  (este script)
-corregir_ext_kcor.py       ->  extinción galáctica, corrección K, magnitudes absolutas, masa
-clasificar_galaxias.py     ->  clasificación color + índice de Sérsic
-```
+| Paso | Dónde | Script | Qué hace |
+|---|---|---|---|
+| 0 | RSP (notebook) | `z01_dp2_galfitm_lotes_v8.ipynb` | Descarga stamps, PSF, sigma, máscara y feedme por lotes (solo galaxias con g, r e i) |
+| 1 | `Galfitm/` | `crear_carpeta_lotes.sh` | Junta varios lotes en una carpeta de trabajo `galaxias_X_Y` |
+| 2 | `galaxias_X_Y/` | `filtrar_gri_local.py` | (solo lotes bajados con la v7) quita galaxias sin g, r, i útiles |
+| 3 | `galaxias_X_Y/` | `correr_galfitm_paralelo.sh` | Ajuste single-Sérsic multibanda con GalfitM |
+| 4 | `galaxias_X_Y/` | `leer_output_galfitm.py` | Lee las salidas → `galfitm_resultados.csv` |
+| 5 | `analisis_conjunto/` | `combinar_carpetas.py` | Une las tablas de todas las carpetas (columna `carpeta`) |
+| 6 | `analisis_conjunto/` | `procesar_muestra.py` | Cortes de calidad, cruce con LSST y categorías A/B/C/D |
+| 7 | `analisis_conjunto/` | `statmorph_completo.py` | statmorph-lsst para las galaxias A + B |
+| 8 | `analisis_conjunto/` | `generar_bd_feedmes.py` + `correr_bd.sh` | Bulbo + disco con GalfitM para las galaxias A + B |
+
+Los pasos 3 a 8 los coordina **`actualizar_todo.py`** (ver [Uso diario](#uso-diario-actualizar_todopy)).
 
 ---
+
+## Estructura de carpetas
+
+```
+Galfitm/
+├── galfitm_dp2_z01_loteXX.tar.gz        # lotes descargados del RSP
+├── crear_carpeta_lotes.sh
+├── statmorph-lsst/                      # librería statmorph-lsst (clonada)
+├── galaxias_1_9/                        # carpeta de trabajo (lotes 1-9)
+│   ├── galfitm_inputs/<objectId>/       # una carpeta por galaxia
+│   ├── galfitm-1.4.4-linux-x86_64
+│   ├── correr_galfitm_paralelo.sh       # (se copia sola)
+│   ├── leer_output_galfitm.py           # (se copia sola)
+│   └── galfitm_resultados.csv
+├── galaxias_10_22/                      # carpeta de trabajo (lotes 10-22)
+│   └── ...
+└── analisis_conjunto/                   # análisis de TODAS las carpetas
+    ├── actualizar_todo.py
+    ├── combinar_carpetas.py
+    ├── procesar_muestra.py
+    ├── statmorph_completo.py
+    ├── generar_bd_feedmes.py
+    ├── correr_bd.sh
+    ├── correr_galfitm_paralelo.sh
+    ├── leer_output_galfitm.py
+    ├── galfitm-1.4.4-linux-x86_64
+    └── analisis_galfitm/                # resultados (tablas y figuras)
+```
+
+Contenido de cada carpeta de galaxia (`galfitm_inputs/<objectId>/`):
+
+| Archivo | Origen |
+|---|---|
+| `<ID>_sci_<b>.fits`, `<ID>_sig_<b>.fits`, `<ID>_psf_<b>.fits`, `<ID>_mask.fits` | paso 0 |
+| `<ID>.feedme` | paso 0 (single-Sérsic) |
+| `<ID>_galfitm_out.fits`, `<ID>_galfit.01`, `galfitm_<ID>.log` | paso 3 |
+| `<ID>_bd.feedme`, `<ID>_bd.constraints` | paso 8 |
+| `<ID>_galfitm_bd_out.fits`, `<ID>_bd_galfit.01`, `galfitm_bd_<ID>.log` | paso 8 |
 
 ## Requisitos
 
-- Python ≥ 3.9
-- `numpy`, `pandas`, `matplotlib`, `astropy`, `pyarrow` (para leer el parquet)
-
-```bash
-pip install numpy pandas matplotlib astropy pyarrow
-```
-
-Para `corregir_ext_kcor.py` además:
-
-- `calc_kcor_fun.py`: módulo de corrección K de Chilingarian et al.
-  ([kcor.sai.msu.ru](http://kcor.sai.msu.ru)), en la misma carpeta que el script.
-- `dustmaps` (opcional): solo si se recalcula E(B−V) con el mapa SFD
-  (`EBV_FUENTE = 'sfd'`).
-
-## Estructura de carpetas esperada
-
-```
-mi_muestra/
-├── procesar_muestra.py
-├── corregir_ext_kcor.py
-├── calc_kcor_fun.py                # módulo de Chilingarian (para la corrección K)
-├── galfitm_resultados.csv          # salida de leer_output_galfitm.py
-├── z01_lsst_1.parquet              # catálogo LSST (ruta configurable)
-└── galfitm_inputs/
-    └── <objectId>/
-        ├── <objectId>_galfitm_out.fits   # INPUT_b, MODEL_b, RESIDUAL_b por banda
-        ├── <objectId>_mask.fits
-        └── <objectId>_sig_<banda>.fits
-```
-
-Todas las rutas son relativas a la ubicación del script, así que basta con
-copiarlo en la carpeta de cada muestra.
-
-## Uso
-
-```bash
-python3 procesar_muestra.py          # corre los pasos 2, 3 y 4
-python3 procesar_muestra.py 4        # solo el paso 4 (p. ej., tras cambiar un umbral)
-python3 procesar_muestra.py 3 4      # pasos 3 y 4
-```
-
-Antes de empezar, el script comprueba que existan el parquet y la salida de cada
-paso anterior; si falta algo, indica qué archivo y se detiene.
-
-## Configuración general
-
-Al inicio del script:
-
-| Variable | Por defecto | Descripción |
-|----------|-------------|-------------|
-| `LSST_PARQUET` | `z01_lsst_1.parquet` | Ruta al catálogo LSST |
-| `REVISAR_IMAGENES_FITS` | `True` | Paso 2: abre los FITS para detectar bandas vacías o con fondo malo |
-| `RECALCULAR_METRICAS` | `False` | Paso 4: fuerza a rehacer las métricas de imagen |
-
-Los umbrales de cada corte están al inicio de cada paso (buscar `CONFIG` en el código).
+- Python ≥ 3.9 con `numpy`, `pandas`, `matplotlib`, `scipy`, `astropy`, `pyarrow`
+- `photutils` y la librería **statmorph-lsst** (`pip install -e Galfitm/statmorph-lsst`,
+  o dejarla en `Galfitm/statmorph-lsst`: `statmorph_completo.py` la encuentra sola)
+- GalfitM 1.4.4 (`galfitm-1.4.4-linux-x86_64`)
 
 ---
 
-## Paso 2 — Cortes de calidad de GalfitM
+## Paso 0 — Descarga en el RSP (`z01_dp2_galfitm_lotes_v8.ipynb`)
 
-Aplica cortes en dos niveles.
+Notebook para el Rubin Science Platform. Para cada galaxia del catálogo
+espectroscópico cruzado con LSST:
 
-**Por galaxia** (se descarta la galaxia completa):
+- recorta un stamp por banda (imagen, varianza → sigma), la PSF y genera la
+  máscara de vecinos (SEP);
+- escribe el feedme single-Sérsic con valores iniciales de LSST;
+- trabaja por **lotes de 800 galaxias** (`LOTE = 1, 2, 3...`) y empaqueta cada
+  lote en `galfitm_dp2_z01_loteXX.tar.gz`.
 
-| Corte | Valor | Motivo |
-|-------|-------|--------|
-| χ²/ν mínimo | `CHI2_MIN = 0.5` | χ²/ν ≈ 0 indica un problema (sigma mal estimada, banda vacía) |
-| χ²/ν máximo | `CHI2_MAX = 5.0` | el modelo no reproduce la galaxia |
+**Filtro g, r, i (v8).** Solo se descargan galaxias con las tres bandas
+(`BANDAS_OBLIGATORIAS = ['g', 'r', 'i']`): se piden primero sus PSF y, si falta
+alguna, la galaxia se descarta sin bajar el resto. Si el stamp de g, r o i tiene
+más del 30 % de píxeles vacíos (`FRAC_VACIA_MAX`), la galaxia también se descarta.
+Las bandas u, z, y se descargan cuando existen, pero no son obligatorias.
 
-**Por banda** (solo esa banda pasa a NaN; el resto de la galaxia se conserva):
+El filtro está dentro del bucle (no en el catálogo), así que **la numeración de
+los lotes no cambia** entre versiones: los lotes 1–15 se bajaron con la v7 y del
+16 en adelante con la v8.
+
+> En la última celda, `CONFIRMAR_BORRADO` borra el lote del servidor. Conviene
+> dejarlo en `False` y activarlo a mano solo después de descargar el tar.
+
+## Paso 1 — Agrupar lotes (`crear_carpeta_lotes.sh`)
+
+```bash
+cd Galfitm
+./crear_carpeta_lotes.sh 10 22            # solo muestra lo que haría
+./crear_carpeta_lotes.sh 10 22 --mover    # crea galaxias_10_22/ y mueve las galaxias
+```
+
+Busca las carpetas de galaxias (nombre numérico y con `.feedme`) dentro de los
+lotes indicados, hasta 3 niveles de profundidad (algunos tar traen una subcarpeta
+extra), las **mueve** a `galaxias_X_Y/galfitm_inputs/` y copia el ejecutable y los
+scripts desde `galaxias_1_9`. Si un objectId aparece en dos lotes, conserva el
+primero y avisa.
+
+## Paso 2 — Filtro g, r, i local (`filtrar_gri_local.py`)
+
+Solo para lotes descargados con la v7 (1–15). Aplica el mismo filtro que la v8:
+
+```bash
+cd galaxias_10_22
+python3 filtrar_gri_local.py            # crea sin_gri.txt (no borra)
+python3 filtrar_gri_local.py --borrar   # borra esas carpetas
+```
+
+No es obligatorio (el paso 6 descarta igual esas galaxias), pero libera espacio
+y evita ajustarlas.
+
+## Paso 3 — Single-Sérsic (`correr_galfitm_paralelo.sh`)
+
+```bash
+cd galaxias_10_22
+./correr_galfitm_paralelo.sh 3       # 3 procesos en paralelo
+```
+
+- Cada ajuste corre en una **carpeta temporal propia** con un enlace a
+  `galfitm_inputs/`: las rutas del feedme (`galfitm_inputs/<ID>/...`) siguen
+  valiendo y los `galfit.NN` de distintos procesos no se mezclan.
+- Los parámetros finales se guardan como `<ID>_galfit.01` en la carpeta de la galaxia.
+- **Reanudable**: salta las galaxias con `<ID>_galfitm_out.fits`.
+- Las que fallan van a `lista_fallo.txt` y **no se reintentan** en corridas
+  siguientes (`REINTENTAR=1 ./correr_galfitm_paralelo.sh 3` para reintentarlas).
+
+Receta del feedme: un Sérsic más cielo, con polinomios de Chebyshev en λ
+(posición constante; R_e, n, b/a y PA lineales; magnitud libre por banda),
+zeropoint 31.4 (flujos en nJy → AB) y escala 0.2″/px.
+
+## Paso 4 — Leer salidas (`leer_output_galfitm.py`)
+
+```bash
+python3 leer_output_galfitm.py
+```
+
+Lee el header de cada `<ID>_galfitm_out.fits` y crea `galfitm_resultados.csv`
+(una fila por galaxia): `MAG_b, RE_b, N_b, AR_b, PA_b, XC_b, YC_b` y sus errores
+por banda, `SKY_b`, `chi2nu`, `flag_b` (parámetros marcados con `*` por GalfitM)
+y `estado` (`ok`, `sin_output`, `error`). Hace además figuras input/modelo/residuo
+de 100 galaxias al azar (`galfitm_imagenes/`).
+
+---
+
+## Paso 5 — Unir carpetas (`combinar_carpetas.py`)
+
+Une los `galfitm_resultados.csv` de todas las carpetas `galaxias_*` y agrega:
+
+- `carpeta`: nombre de la carpeta de origen;
+- `ruta_carpeta`: ruta completa (los scripts la usan para encontrar los FITS).
+
+Si un objectId está en dos carpetas, se conserva el ajuste `ok` con menor χ²/ν.
+
+**Los cortes se hacen sobre la muestra completa**, no por carpeta, porque varios
+umbrales se calculan con la población (dispersión de colores, offsets con LSST):
+por carpeta saldrían umbrales distintos para galaxias equivalentes.
+
+## Paso 6 — Cortes y muestra confiable (`procesar_muestra.py`)
+
+Tres etapas en un script (`python3 procesar_muestra.py [2] [3] [4]`).
+
+### 6a. Cortes de calidad de GalfitM
+
+Por galaxia: `0.5 ≤ χ²/ν ≤ 5`.
+
+Por banda (solo esa banda pasa a NaN):
 
 | Motivo | Condición |
-|--------|-----------|
-| `flag_galfitm` | GalfitM marcó algún parámetro con `*` |
+|---|---|
+| `flag_galfitm` | GalfitM marcó un parámetro con `*` |
 | `sin_error` | error de magnitud vacío o ≤ 0 |
 | `mag_fuera` | magnitud fuera de [10, 25] |
 | `re_fuera` | R_e fuera de [0.5, 150] px |
-| `n_limite` | n fuera de [0.21, 7.9] (pegado a los límites de GalfitM) |
+| `n_limite` | n fuera de [0.21, 7.9] |
 | `ar_bajo` | b/a < 0.1 |
-| `color_outlier` | la magnitud de la banda se aleja > 5σ (y > 1 mag) del color típico de la población |
-| `imagen_vacia` | > 30 % de píxeles = 0 o NaN en la imagen INPUT |
-| `fondo_malo` | variación del fondo a gran escala > 3 veces el ruido (gradientes, imágenes sin ruido) |
+| `color_outlier` | magnitud > 5σ (y > 1 mag) fuera del color típico de la población |
+| `imagen_vacia` | > 30 % de píxeles vacíos en la imagen INPUT |
+| `fondo_malo` | variación de fondo a gran escala > 3 × ruido |
 
-Las dos últimas solo se aplican con `REVISAR_IMAGENES_FITS = True`. El ruido se
-mide con diferencias entre píxeles vecinos (insensible a gradientes) y el fondo
-con medianas en bloques de 20×20 píxeles.
+Las métricas de imagen se guardan en `calidad_imagenes.csv` y **solo se miden
+las galaxias nuevas** en cada corrida.
 
-**Salidas:** `galfitm_limpio.csv`, `galaxias_a_revisar.csv`, `calidad_imagenes.csv`
-y las figuras 01–07.
+### 6b. Cruce con LSST
 
----
+Por `objectId` con el catálogo (`LSST_PARQUET`). Si hay varios espectros por
+objeto, se conserva `f_z = 1` y el de menor distancia. Se convierte
+`{b}_sersicFlux` (nJy) a magnitud AB con el mismo zeropoint (31.4).
 
-## Paso 3 — Crossmatch con LSST
+### 6c. Categorías A / B / C / D
 
-- Cruza por `objectId` (como entero de 64 bits, para no perder precisión).
-- Si un objeto LSST tiene varios espectros, conserva uno: prioriza `f_z = 1` y,
-  entre esos, la menor distancia `_dist_arcsec`.
-- Elimina los valores centinela de `cModelMag` (≈ 80).
-- Convierte `{b}_sersicFlux` (nJy) a magnitud AB: `m = −2.5 log10(F) + 31.4`.
-  Es el mismo zeropoint de los ajustes de GalfitM, así que ambas magnitudes son
-  directamente comparables.
-- Compara:
-  - magnitud de GalfitM con `cModelMag` y con la magnitud Sérsic de LSST, por banda;
-  - R_e, n y b/a de GalfitM (banda i) con MultiProFit (solo objetos sin
-    `shape_flag` ni flags de fallo).
+**LSST no se toma como la verdad.** MultiProFit es otro ajuste paramétrico
+(un solo n para todas las bandas, n en [0.5, 6], afectado por el *deblender*).
+Se usa como segunda medida y solo para detectar diferencias **enormes**:
 
-**Salidas:** `galfitm_x_lsst.csv`, `resumen_magnitudes.csv`, `sin_cruce.csv`
-(si hay galaxias sin pareja) y las figuras 08–11.
+| Parámetro | Desacuerdo si la diferencia (respecto al offset mediano) supera |
+|---|---|
+| Magnitud | 1.0 mag (y ≥ 5σ) |
+| R_e | 0.30 dex = factor 2 (y ≥ 5σ) |
+| n | 0.30 dex = factor 2 (y ≥ 5σ); no se compara si n de LSST está en su límite |
+| b/a | 0.25 (y ≥ 5σ) |
 
----
+Cuando hay desacuerdo, decide **la imagen** (independiente de ambos modelos),
+en una elipse de 2 R_e: flujo de apertura sobre los píxeles, cociente flujo
+modelo / flujo imagen y *residual flux fraction* (RFF, Hoyos et al. 2011).
 
-## Paso 4 — Muestra confiable (categorías A/B/C/D)
+| Categoría | Condición |
+|---|---|
+| **A** | Coincide con LSST |
+| **B** | Desacuerdo enorme, pero GalfitM reproduce la imagen (RFF < 0.10 y flujo modelo/imagen en 0.9–1.1) |
+| **C** | Desacuerdo enorme y GalfitM tampoco reproduce la imagen |
+| **D** | No pasa los cortes de 6a, le falta g, r o i buena, tiene < 3 bandas buenas, o espectro no confiable (`f_z ≠ 1`, clase ≠ GALAXY, cruce > 1″) |
 
-**Los parámetros de LSST no se toman como la verdad.** MultiProFit es otro ajuste
-paramétrico (un solo n para todas las bandas, n limitado a [0.5, 6], afectado por
-el *deblender*), así que también puede equivocarse. LSST se usa como una
-**segunda medida independiente**.
+**Las galaxias A + B son las que pasan a statmorph y bulbo + disco.**
 
-### Lógica
+Además se mide la curva de crecimiento en la imagen para comprobar qué R_e
+encierra la mitad de la luz (figura `21_radio_efectivo.png`).
 
-1. **Si GalfitM y LSST coinciden**, dos códigos distintos llegan al mismo resultado.
-2. **Si no coinciden**, al menos uno se equivoca. Para decidir, se usa un árbitro
-   independiente de ambos modelos: **la imagen**. En una elipse de 2 R_e se mide:
-   - el **flujo de apertura** sumando directamente los píxeles (sin modelo);
-   - el cociente **flujo del modelo de GalfitM / flujo de la imagen**;
-   - el **RFF** (*residual flux fraction*, Hoyos et al. 2011): flujo del residuo
-     por encima del esperado por el ruido.
-
-### Acuerdo con LSST
-
-Las diferencias GalfitM − LSST se miden **respecto al offset mediano** de la
-muestra, para que un sesgo sistemático no elimine galaxias:
-
-| Parámetro | Tolerancia |
-|-----------|------------|
-| Magnitud | ± 0.5 mag |
-| log R_e | ± 0.15 dex |
-| log n | ± 0.15 dex (no se compara si el n de LSST está en sus límites, 0.5 o 6) |
-| b/a | ± 0.10 |
-
-La comparación usa la banda i; si falta, r, z, g o y, en ese orden.
-
-### Requisitos previos (si no se cumplen → D)
-
-- Pasa los cortes de galaxia del paso 2 y tiene al menos 3 bandas buenas.
-- Tiene buenas las **bandas obligatorias** `['g', 'r', 'i']`:
-  g y r para la clasificación (g − r, n_r), i para la masa estelar de
-  Taylor et al. (2011), que usa (g − i) y M_i.
-- Espectro confiable: `f_z = 1`, clase `GALAXY`, distancia del cruce ≤ 1″.
-
-### Categorías
-
-| Categoría | Condición | Interpretación |
-|-----------|-----------|----------------|
-| **A** | GalfitM y LSST coinciden | Alta confianza: dos códigos independientes concuerdan |
-| **B** | No coinciden (o LSST no es comparable), pero GalfitM reproduce la imagen: RFF < 0.10 y flujo modelo/imagen entre 0.9 y 1.1 | Confiable; la diferencia se atribuye a LSST o al método |
-| **C** | No coinciden y GalfitM tampoco reproduce bien la imagen | Revisar a ojo |
-| **D** | No cumple los requisitos previos | Descartada |
-
-La columna `motivo_categoria` explica por qué cada galaxia está en su categoría,
-y `problemas_lsst` anota los problemas internos del ajuste de LSST
-(`shape_flag`, galaxia fragmentada por el *deblender*, n en el límite, χ² alto).
-Estos últimos son informativos y no deciden la categoría.
-
-### Métricas de imagen en caché
-
-La primera ejecución abre todos los FITS (tarda unos minutos) y guarda los
-resultados en `metricas_imagen.csv`; las siguientes los reutilizan. Si las
-métricas guardadas no cubren las galaxias actuales (por ejemplo, porque son de
-otra muestra), el script lo detecta y las recalcula automáticamente.
-
-**Salidas:** `muestra_clasificada.csv` (todas las galaxias), `muestra_A.csv`,
-`muestra_AB.csv`, `metricas_imagen.csv` y las figuras 12–14.
+Salidas en `analisis_galfitm/muestra/`: `muestra_clasificada.csv` (todas, con
+`categoria`, `motivo_categoria`, `problemas_lsst`), `muestra_AB.csv`,
+`metricas_imagen.csv` (caché) y figuras 12–14 y 21.
 
 ---
 
-## corregir_ext_kcor.py — Extinción, corrección K y masa estelar
+## Paso 7 — statmorph (`statmorph_completo.py`)
 
-Se ejecuta después de `procesar_muestra.py`:
+Medición no paramétrica con **statmorph-lsst** (CAS, Gini–M20, MID, radios de
+Petrosian, Sérsic) en g, r, i, usando la sigma como mapa de pesos, la PSF y la
+máscara de cada galaxia.
 
 ```bash
-python3 corregir_ext_kcor.py
+python3 statmorph_completo.py <carpeta_galaxias> --lista pendientes.csv \
+        --ncpu 3 --out salida.csv --sin-doble --png 0
 ```
 
-Usa las categorías **A + B** de `muestra_clasificada.csv` (si no existe, usa
-`galfitm_x_lsst.csv` con `f_z = 1`). Aplica el mismo método que el pipeline de
-S-PLUS, para que los resultados de ambas muestras sean comparables.
+| Opción | Uso |
+|---|---|
+| `--lista` | CSV con los `objectId` a medir (columna `--col`, por defecto `objectId`) |
+| `--sin-doble` | sin el ajuste Sérsic doble (más rápido) |
+| `--png N` | figuras de control de las N primeras galaxias (0 = ninguna) |
 
-### 1. Extinción galáctica
+Guarda un parcial cada 10 galaxias. Normalmente **no se corre a mano**:
+`actualizar_todo.py` arma la lista de pendientes de cada carpeta y lo lanza.
 
-```
-A_V = R_V · E(B−V)        R_V = 3.1
-A_λ = CCM89(λ_eff, A_V)   Cardelli, Clayton & Mathis (1989)
-m_ext = m_GalfitM − A_λ
-```
+Resultados:
+- cada corrida → `analisis_galfitm/statmorph_corridas/<carpeta>_<fecha>.csv`;
+- tabla unida (solo A + B, sin duplicados, con `carpeta`) →
+  **`analisis_galfitm/statmorph_resultados.csv`**.
 
-- **E(B−V):** por defecto la columna `ebv` del catálogo LSST
-  (`EBV_FUENTE = 'columna'`); con `EBV_FUENTE = 'sfd'` se recalcula con el mapa
-  SFD mediante `dustmaps`. Conviene verificar que la columna de LSST provenga de SFD.
-- **Escala de SFD:** `SFD_ESCALA = 1.0` usa SFD original (igual que S-PLUS);
-  `0.86` aplica la recalibración de Schlafly & Finkbeiner (2011). Debe usarse el
-  mismo valor en todas las muestras.
-- **CCM89 completo:** incluye la rama infrarroja (x < 1.1 μm⁻¹), necesaria para
-  la banda y. En u–z coincide con la función óptica del pipeline de S-PLUS.
+Una galaxia cuenta como hecha si su `objectId` aparece en cualquier CSV de
+`statmorph_corridas/` (para aprovechar corridas anteriores, copiarlas ahí).
 
-Longitudes de onda efectivas LSST (Ivezić et al. 2019) y coeficientes resultantes:
+## Paso 8 — Bulbo + disco
 
-| Banda | λ_eff [Å] | A_λ / E(B−V) |
-|-------|-----------|--------------|
-| u | 3671 | 4.81 |
-| g | 4827 | 3.64 |
-| r | 6223 | 2.70 |
-| i | 7546 | 2.06 |
-| z | 8691 | 1.58 |
-| y | 9712 | 1.31 |
+### Feedmes (`generar_bd_feedmes.py`)
 
-### 2. Corrección K
+Para cada galaxia A + B, a partir de su feedme single-Sérsic. Receta de
+**Vika et al. (2014, MNRAS 444, 3603, sec. 2.2.2)** (`INICIO = 'vika2014'`):
 
-Con el método de Chilingarian, Melchior & Zolotukhin (2010), usando colores ya
-corregidos por extinción. Para cada banda se prueba la lista de colores en orden
-y se usa el primero disponible en cada galaxia:
+| | Bulbo (Sérsic) | Disco (exponencial) |
+|---|---|---|
+| Magnitud inicial | m_ss + 0.75 | m_ss + 0.65 |
+| Radio inicial | R_e = 0.5 R_e,ss | R_e = R_e,ss (R_s = R_e / 1.678) |
+| n inicial | n_ss | 1 (fijo) |
+| b/a, PA iniciales | 0.8, 10° | los del single-Sérsic |
+| Variación con λ | R_e, n, b/a, PA constantes; magnitud libre por banda | ídem |
 
-| Banda | Colores (en orden de preferencia) |
-|-------|-----------------------------------|
-| u | u − r, u − i, u − z |
-| g | g − r, g − i, g − z |
-| r | g − r, u − r |
-| i | g − i, u − i |
-| z | g − z, r − z, u − z |
+- Mismo centro para ambas componentes; cielo fijo.
+- Restricciones (`<ID>_bd.constraints`): magnitudes 5–35, R_e 0.04–600″,
+  n 0.1–15, centro común con desplazamiento ≤ √(s/8) px.
+- Las bandas que no pasaron los cortes **se quitan del ajuste**.
+- Exige g, r, i y al menos 3 bandas buenas.
+- `NO_SOBRESCRIBIR = True`: no toca feedmes existentes (protege ajustes en curso).
+- Rutas relativas a la carpeta de la galaxia (cada ajuste corre ahí dentro).
 
-La columna `kcor_color_<banda>` registra qué color se usó en cada galaxia.
-La banda **y** no tiene polinomio en `calc_kcor`: queda corregida solo por
-extinción (sin M_y).
+Recetas alternativas: `'v2'` (versión DP1) y `'proporcional'`.
 
-### 3. Magnitudes absolutas y colores en reposo
+### Ajuste (`correr_bd.sh`)
 
-```
-M = m_ext − K(z, color) − DM(z)        cosmología plana, H0 = 70, Ωm = 0.3
-(g − r)_0 = M_g − M_r      (u − r)_0 = M_u − M_r      (g − i)_0 = M_g − M_i
+```bash
+./correr_bd.sh 3        # 3 galaxias en paralelo
 ```
 
-Se usa el redshift espectroscópico `z`; para z < 0.001 la distancia queda en NaN.
-
-### 4. Masa estelar
-
-Taylor et al. (2011), con color y magnitud **en reposo**:
-
-```
-log10(M*/M☉) = 1.15 + 0.70 (g − i)_0 − 0.40 M_i
-```
-
-Como la banda i es obligatoria en `procesar_muestra.py`, todas las galaxias A + B
-tienen masa.
-
-### Salidas
-
-En `analisis_galfitm/fotometria/`:
-
-| Archivo | Contenido |
-|---------|-----------|
-| `galaxias_ext_kcor.csv` | Por banda: `MAG_` (GalfitM), `A_` (extinción), `mag_ext_`, `kcor_`, `kcor_color_`, `M_`. Además `EBV_usado`, `DM`, colores observados (`*_obs`) y en reposo (`*_0`), y `logM_taylor` |
-| `17_kcorrecciones.png` | Corrección K vs z para cada banda |
-| `18_color_observado_vs_reposo.png` | Color vs z antes y después de la corrección K; la línea roja sigue a las galaxias con n_r ≥ 2.5. Si la corrección funciona, la tendencia con z desaparece o se reduce |
-
-### Advertencia
-
-Los polinomios de `calc_kcor` están calibrados para los filtros de **SDSS**. Los
-de LSST son similares y a z < 0.1 la diferencia es pequeña, pero se trata de una
-aproximación que conviene mencionar.
+Lee `lista_bd.txt`, corre GalfitM **dentro de la carpeta de cada galaxia**,
+renombra `galfit.NN` → `<ID>_bd_galfit.NN`, salta las que ya tienen
+`<ID>_galfitm_bd_out.fits` (reanudable) y deja `progreso_bd.txt` y
+`fallidas_bd.txt`.
 
 ---
 
-## Figuras
+## Uso diario: `actualizar_todo.py`
 
-| Figura | Contenido |
-|--------|-----------|
-| `01_chi2.png` | Distribución de χ²/ν con los cortes |
-| `02_histogramas_por_banda.png` | Magnitud, R_e, n y b/a por banda, antes y después de los cortes |
-| `03_dependencia_lambda.png` | Variación de R_e, n y b/a con la longitud de onda |
-| `04_colores.png` | Color-magnitud, color-color y color vs n |
-| `05_n_re_ar.png` | n vs R_e y b/a vs n |
-| `06_errores.png` | Errores formales de GalfitM vs magnitud |
-| `07_calidad_imagenes.png` | Métricas de fondo y fracción de píxeles vacíos (para calibrar los cortes) |
-| `08_mag_vs_cmodel.png` | GalfitM vs `cModelMag` de LSST, por banda |
-| `09_mag_vs_sersic_lsst.png` | GalfitM vs Sérsic de LSST, por banda |
-| `10_estructura_vs_lsst.png` | R_e, n y b/a: GalfitM vs MultiProFit |
-| `11_dmag_vs_n.png` | Diferencia de magnitud vs índice de Sérsic |
-| `12_consistencia_lsst.png` | Diferencias GalfitM − LSST con las tolerancias |
-| `13_arbitro_imagen.png` | RFF, cociente de flujo y comparación con la fotometría de apertura |
-| `14_categorias.png` | Propiedades de las galaxias en cada categoría |
+Desde `analisis_conjunto/`. Recorre las carpetas `galaxias_*` (junto a esta
+carpeta o un nivel arriba) y corre solo lo pendiente:
 
-Las figuras 17 y 18 las genera `corregir_ext_kcor.py` (ver su sección).
-Los títulos y ejes de todas las figuras están en inglés.
+1. single-Sérsic de galaxias sin salida (no reintenta las fallidas) y
+   `leer_output_galfitm.py` si hay salidas nuevas;
+2. `combinar_carpetas.py` y `procesar_muestra.py` (cachés: solo mide lo nuevo);
+3. statmorph y bulbo + disco **solo** para las A + B que no los tienen;
+4. une los resultados de statmorph.
+
+```bash
+python3 actualizar_todo.py --listar                 # qué falta, sin correr nada
+python3 actualizar_todo.py --nproc 3                # todo lo pendiente
+python3 actualizar_todo.py --solo-statmorph         # solo statmorph (usa los cortes ya hechos)
+python3 actualizar_todo.py --sin-bd                 # todo menos bulbo + disco
+python3 actualizar_todo.py --sin-statmorph          # todo menos statmorph
+python3 actualizar_todo.py --sin-ss                 # no lanzar single-Sérsic
+python3 actualizar_todo.py --reintentar-fallidas    # reintentar single-Sérsic fallidos
+python3 actualizar_todo.py --limpiar-sobrantes      # borrar bulbo+disco de galaxias que salieron de A+B
+```
+
+`--listar` muestra, por carpeta, cuántas galaxias pasan los cortes y cuántas
+tienen o les faltan bulbo + disco (`bd_hecho`, `bd_falta`) y statmorph
+(`sm_hecho`, `sm_falta`).
+
+Para sumar una carpeta nueva basta con crearla (paso 1) y volver a correr
+`actualizar_todo.py`.
 
 ---
 
-## Advertencias
+## Buenas prácticas al correr
 
-- **Sesgo por bandas obligatorias.** Exigir la banda i elimina ~10 % de la
-  muestra. Esas galaxias son algo más rojas y esferoidales que el resto (les
-  falta i por la cobertura de LSST, no por mala calidad). Conviene mencionarlo
-  en la descripción de la muestra.
-- **Sesgo de la categoría A.** Las galaxias grandes, brillantes y cercanas suelen
-  quedar fuera de A porque el *deblender* de LSST las fragmenta. Para estudios
-  de estructura se recomienda usar A + B.
-- **Factor de escala en R_e.** El R_e de GalfitM es sistemáticamente ~1.46 veces
-  el de MultiProFit, sin dependencia con b/a ni con n. Es una diferencia de
-  escala o de definición que debe resolverse antes de publicar.
-- **Errores formales.** Los errores de GalfitM están subestimados; el header
-  guarda solo 4 decimales (piso de 10⁻⁴ mag).
-- **Columnas de LSST.** Las columnas informativas (`shape_flag`,
-  `deblend_blendNChild`, `sersic_chi2_reduced`) son opcionales; si faltan en el
-  parquet se usan valores neutros. Las columnas del espectro (`f_z`, `class`,
-  `_dist_arcsec`) y del Sérsic de LSST sí son necesarias.
+- **Ver el avance en pantalla** (sin `nohup`):
+  ```bash
+  OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 python3 actualizar_todo.py --solo-statmorph --nproc 3 2>&1 | tee statmorph_log.txt
+  ```
+  No cerrar esa terminal mientras corre.
+- **En segundo plano**: `nohup ... > log.txt 2>&1 &` y `tail -f log.txt`.
+- **Detener: Ctrl+C. Nunca Ctrl+Z** (pausa el proceso; queda en estado `T`
+  ocupando memoria). Todos los pasos son reanudables.
+- **No lanzar dos veces lo mismo.** Antes de lanzar, revisar:
+  ```bash
+  ps -eo pid,stat,lstart,args | grep -E "statmorph_completo|correr_bd|galfitm-1.4.4" | grep -v grep
+  ```
+  `R`/`S` = activo, `T` = pausado (eliminar con `kill -9 PID`), `Z` = zombi (inofensivo).
+- **No correr bulbo + disco desde dos lugares a la vez** (usar `--sin-bd` si ya
+  hay un `correr_bd.sh` activo).
+- `OMP_NUM_THREADS=1` evita que statmorph compita por núcleos con GalfitM.
+  Con `nproc` núcleos, no superar `nproc − 1` procesos en total.
+
+---
+
+## Resultados de validación (muestra actual)
+
+Con 7466 galaxias (`galaxias_1_9` + `galaxias_10_22`):
+
+| Categoría | N |
+|---|---|
+| A | 3939 |
+| B | 900 |
+| C | 383 |
+| D | 2244 (1334 por faltar g, r o i buena) |
+
+- En los desacuerdos, la magnitud de LSST es más débil que el flujo de apertura
+  medido en la imagen en el **75 %** de los casos (GalfitM: 1.5 %): cuando difieren,
+  quien pierde flujo suele ser LSST (galaxias con `shape_flag` o fragmentadas).
+- **Radio efectivo** (galaxias con n < 2): dentro del R_e de GalfitM cae el 46 %
+  de la luz de la imagen (esperado: 50 %, menos por la PSF); dentro del R_e de
+  LSST, solo el 26 %. El radio de media luz medido en la imagen es 1.07× el de
+  GalfitM y 1.66× el de LSST. Antes de publicarlo, conviene verificar la
+  definición de `sersic_reff_major` en MultiProFit.
+
+---
 
 ## Referencias
 
-- Cardelli, J. A., Clayton, G. C. & Mathis, J. S. (1989), ApJ, 345, 245 — ley de extinción CCM89
-- Chilingarian, I. V., Melchior, A.-L. & Zolotukhin, I. Yu. (2010), MNRAS, 405, 1409 — corrección K
-- Chilingarian, I. V. & Zolotukhin, I. Yu. (2012), MNRAS, 419, 1727 — extensión de la corrección K
+- Conselice, C. J. (2003), ApJS, 147, 1 — CAS
 - Häußler, B. et al. (2013), MNRAS, 430, 330 — GalfitM / MegaMorph
 - Hoyos, C. et al. (2011), MNRAS, 411, 2439 — *Residual flux fraction*
-- Ivezić, Ž. et al. (2019), ApJ, 873, 111 — LSST (filtros)
-- Schlafly, E. F. & Finkbeiner, D. P. (2011), ApJ, 737, 103 — recalibración de SFD
-- Schlegel, D. J., Finkbeiner, D. P. & Davis, M. (1998), ApJ, 500, 525 — mapa de polvo SFD
-- Taylor, E. N. et al. (2011), MNRAS, 418, 1587 — masa estelar a partir de (g − i)
+- Ivezić, Ž. et al. (2019), ApJ, 873, 111 — LSST
+- Lotz, J. M., Primack, J. & Madau, P. (2004), AJ, 128, 163 — Gini–M20
+- Rodriguez-Gomez, V. et al. (2019), MNRAS, 483, 4140 — statmorph
+- Vika, M. et al. (2014), MNRAS, 444, 3603 — bulbo + disco multibanda con GalfitM

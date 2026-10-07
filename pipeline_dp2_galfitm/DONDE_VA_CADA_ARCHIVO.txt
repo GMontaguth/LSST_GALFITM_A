@@ -1,0 +1,27 @@
+Donde va cada archivo (ver README.md para el detalle de cada paso)
+=================================================================
+
+1_rsp/                      -> en el Rubin Science Platform
+    z01_dp2_galfitm_lotes_v8.ipynb     descarga por lotes (solo galaxias con g, r, i)
+
+2_Galfitm/                  -> en Galfitm/ (donde estan los .tar.gz y las carpetas galaxias_*)
+    crear_carpeta_lotes.sh             junta lotes en una carpeta galaxias_X_Y
+
+3_galaxias_X_Y/             -> dentro de cada galaxias_X_Y (solo lotes bajados con la v7)
+    filtrar_gri_local.py               quita galaxias sin g, r, i utiles
+
+4_analisis_conjunto/        -> en Galfitm/analisis_conjunto/
+    actualizar_todo.py                 corre todo lo que falta (punto de entrada)
+    combinar_carpetas.py               une las tablas de todas las carpetas
+    procesar_muestra.py                cortes, cruce con LSST, categorias A/B/C/D
+    statmorph_completo.py              statmorph-lsst (A + B)
+    generar_bd_feedmes.py              feedmes bulbo + disco (Vika et al. 2014)
+    correr_bd.sh                       ajuste bulbo + disco en paralelo
+    correr_galfitm_paralelo.sh         single-Sersic (actualizar_todo.py lo copia a cada galaxias_X_Y)
+    leer_output_galfitm.py             lee salidas (actualizar_todo.py lo copia a cada galaxias_X_Y)
+
+Ademas, en analisis_conjunto/ hace falta:
+    galfitm-1.4.4-linux-x86_64         ejecutable de GalfitM
+    la libreria statmorph-lsst instalada (pip install -e Galfitm/statmorph-lsst)
+    o en Galfitm/statmorph-lsst (statmorph_completo.py la busca ahi)
+Y en procesar_muestra.py revisar LSST_PARQUET (ruta al catalogo de LSST).
