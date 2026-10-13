@@ -1,0 +1,102 @@
+objectId,visual_ok,visual_etiquetas,nota
+739148959515164737,1,,profiles cross at ~4"; disc dominates outskirts; clean residual; bulge flatter (b/a 0.42) than disc
+739151502135814552,3,vecino,disc dominates at all radii; bulge n=4 never dominates; same b/a and similar Re; 1c n=1.4 equally good
+739155075548601644,3,,bulge dominates at all radii; both round; elliptical
+739156037621273043,1,vecino,profiles cross at ~3"; disc dominates outskirts; elongated bulge in round disc; bright neighbours masked
+739156381218661726,1,estructura,face-on spiral; small n=3 bulge; crossing at ~1.5"; spiral arms in residual
+739156656096571847,3,estructura,n_b=0.59 and same b/a and PA as disc: both components describe the same inclined disc
+739160573106737611,0,barra;estructura,strong S-shaped/bar residual; n_b=5.4 bulge nearly as extended as disc; disc barely dominates
+739161191582035346,1,,n_b=1 small pseudo-bulge; crossing at ~1"; disc dominates; borderline with single component
+739161329020983635,1,anillo,crossing at ~4"; disc dominates outskirts; ring-like residual around 5"
+739161741337847056,1,vecino;artefacto,inclined disc with small bulge; crossing ~1"; masked star nearby
+739163734202673378,1,,S0-like; crossing at ~3"; disc dominates 3-15"; clean residual
+739163802922149219,0,barra;anillo,strong bar plus outer ring; the "disc" fits the bar; strong structured residual
+740334233049909289,3,,bulge dominates at all radii; elliptical; disc only corrects the profile
+740341586033929259,1,barra;estructura,crossing at ~7"; disc dominates outskirts; flattened bulge (b/a 0.43) may be bar/lens; mild spiral residual
+740342067070262653,1,estructura;vecino,spiral with compact weak bulge (B/T 0.11); disc dominates everywhere; no clear crossing; companion at edge
+740342135789743944,1,,compact bulge plus extended disc; crossing at ~2.5"; clean residual
+740343166581890290,1,,borderline: disc only marginally above bulge at 7-20"; isophote ellipticity rises outward to the disc value (S0-like)
+740343922496138539,3,estructura,n_b=0.49 with identical b/a and PA: both components describe the same disc
+740345022007770442,1,,compact bulge plus disc; crossing at ~4"; clean residual
+740345434324622700,1,vecino,small bulge; crossing at ~1.2"; disc dominates; faint galaxy
+740347702067352484,1,estructura,spiral; crossing at ~3.5"; strong arm residuals; n_b=0.47 core rather than classical bulge
+740347770786828764,3,estructura,B/T 0.08 elongated n=1.3 component never dominates; single exponential (n=1.0) fits as well: pure disc
+740347770786828793,1,,crossing at ~3.5"; disc dominates outskirts; clean residual
+740349145176367915,1,estructura,inclined spiral; small bulge; crossing ~1"; arm/dust residuals
+740351138041190778,0,barra;estructura,strong S-shaped bar/arm residual; chi2nu 1.67; n_b=6.4 bulge absorbing bar light
+740351138041194428,3,,elongated n=0.7 "bulge" is the inclined disc itself; round "disc" is a faint envelope; 1c n=1.1 equivalent
+740351893955439078,3,,n_b=0.6 weak component never dominates; similar b/a and PA; single exponential equivalent
+740351893955440115,3,,n_b=7 bulge and disc with same b/a; disc only marginally above bulge at 3-10"; single n=4.3 equivalent
+740352512430730500,3,estructura,n_b=0.9 component with 61% of light and same shape as disc: two exponentials describing one disc; 1c n=1.1 equivalent
+740353199625492876,3,barra;estructura,disc dominates at all radii; elongated n=1 "bulge" (b/a 0.31) is a bar/arm feature; 1c n=1.2 equivalent
+740355055051357060,1,,compact n=3.3 bulge; crossing at ~3"; disc dominates 3-15"; clean residual; both round
+741556202785237619,3,vecino,n_b=1.0 with 61% of light and similar shape to disc: one disc split in two; 1c n=1.3 equivalent
+741556752541050670,0,barra;estructura,elongated bulge in face-on disc is a bar; strong structured residual out to ~7"
+741557577174768644,1,estructura,inclined spiral; round n=2 bulge weaker than disc at all radii; strong arm residuals
+741557920772146955,3,,bulge dominates at all radii; disc only touches it near 8"; elliptical
+741559020283778307,1,anillo,compact bulge plus extended disc; crossing ~3"; inner ring/lens residual
+741559432600642862,1,,borderline: disc above bulge from ~6" to ~25" by up to 0.5 mag; mild residual
+741559638759069300,0,estructura;anillo,chi2nu 2.7; n_b=7 bulge as extended as disc (Re 6.7 vs 7.9) and dominates outskirts; strong ring/arm residual
+741565960950935375,1,,borderline: disc above bulge at 2.5-10" only; isophotes flatten outward to disc value; n_b=5.5 retakes the outskirts
+741566716865177828,3,estructura,both components round with similar size; n_b=7 bulge dominates outskirts; single n=3.8 equivalent
+741567129182031973,3,,bulge dominates essentially everywhere; disc only reaches it at 10-25"; same b/a; single n=3.1 equivalent
+741567335340461832,1,vecino,compact bulge; crossing at ~3.5"; disc clearly dominates outskirts; bright star nearby
+741571664667504448,0,barra;anillo,needle "bulge" (b/a 0.21) is a strong bar; ring; strong structured residual
+772393243336791009,1,estructura,spiral with compact n=2.5 bulge matching disc only at centre; no clear crossing; strong arm residuals; borderline with pure disc
+772395236201615358,3,,both round and similar size (Re 2.4 vs 3.0); n_b=6.7; disc only marginally above at 3-6"; elliptical
+772395442360045399,3,barra;estructura,disc dominates everywhere; needle n=1.7 component (b/a 0.22) is a weak bar; arc residuals; 1c n=1.25 equivalent
+772401146076613935,3,artefacto,n_b=1.4 with same b/a and comparable Re as disc: one disc split in two; 1c n=1.3 equivalent; image edge at +6"
+772402314307716755,3,vecino,bulge dominates at all radii (B/T 0.81); disc never dominates
+772402520466149747,1,,compact n=0.75 core plus extended disc; crossing at ~3"; disc clearly dominates; clean residual
+772402657905102998,1,artefacto,round bulge plus inclined disc; crossing at ~5"; saturation bleed/mask artefact crossing the disc
+772402657905103274,0,estructura,bulge and disc both round with similar Re; disc barely above at 5-20"; spiral/ring structure not captured; borderline with single component
+772402726624580341,3,artefacto,bulge dominates out to ~7" and disc is only marginally above beyond; single n=2.9 equivalent
+772403207660920639,1,vecino,compact bulge plus extended flatter disc; crossing at ~5"; isophotes flatten outward; clean residual
+772403894855687208,3,estructura,disc dominates at all radii; weak round n=3 bulge never dominates; 1c n=1.3 equivalent; edge-on-ish disc
+774037013220315709,3,barra,B/T 0.06 needle component (b/a 0.29) is a small bar; disc dominates everywhere; 1c n=1.3 equivalent
+774039143524094496,1,estructura,S0-like: round n=6 bulge plus flat disc (b/a 0.34); disc above bulge at 1.5-8"; ellipticity rises to disc value; antisymmetric inner residual
+774040243035720506,1,vecino;estructura,compact bulge plus extended disc; crossing at ~3"; tidal tail and bright neighbour; asymmetric outer residual
+774040243035720627,2,vecino,close companion at 10" overlapping the disc region; disc only marginally above bulge at 4-15"; cannot tell if the disc is real or companion light
+774040243035720628,2,vecino,bright companion at 10" inside the disc region; disc only marginally above bulge beyond 5"; disc may be companion light
+774041548705778462,1,,compact n=0.7 core plus extended disc; crossing at ~2.5"; clean residual
+774042235900547950,3,estructura,n_b=0.64 with same b/a and PA as disc and equal central brightness: one disc split in two; 1c n=1.2 equivalent
+774043472851133194,0,barra;estructura,elongated "bulge" (b/a 0.32) misaligned with round disc is a bar; strong spiral-arm residual
+774043541570603610,3,barra;estructura,B/T 0.08 needle component (b/a 0.33) never dominates; clumpy disc; 1c n=1.3 equivalent
+774045122118573709,1,vecino,borderline: compact bulge; disc above bulge at 4-20" by ~0.5 mag; clean residual; masked star
+774048351933971577,1,estructura,spiral; compact n=5.7 bulge matches disc only inside 0.5"; disc dominates elsewhere; strong arm residuals; borderline with pure disc
+774048351933971774,1,vecino,compact bulge plus inclined disc; crossing at ~1"; disc dominates 1-15"; delta chi2 +0.07 favours B+D
+774050413518273908,3,estructura;artefacto,n_b=0.9 component never dominates; chi2nu 2.0 driven by spiral arms; 1c n=1.1 equivalent: pure disc
+774050413518274093,1,estructura,compact core (Re 1.2") plus disc; crossing at ~0.6"; spiral-arm residuals
+774057216746474543,0,artefacto,saturation bleed trail across the galaxy; chi2nu 3.05; fit contaminated
+775684425236103538,3,barra,B/T 0.09 needle component (b/a 0.28) never dominates; faint; 1c n=1.25 equivalent
+775686486820407382,1,vecino,borderline: both round; compact bulge (Re 2.5") and disc 3x larger; disc above bulge beyond ~5" by up to 1 mag; clean residual
+775687792490466204,1,,borderline: same b/a; disc above bulge beyond ~5" by ~0.5 mag; clean residual; single n=4.2 equivalent
+775689510477384999,3,artefacto,B/T 0.07 component never dominates; 1c n=1.0 equivalent: pure disc
+775690884866918772,1,estructura,spiral; round n=1.25 bulge; crossing at ~2.5"; disc dominates; arm residuals
+775691091025347087,3,,B/T 0.09 component never dominates; faint inclined disc; 1c n=1.1 equivalent
+775692190536979481,0,barra;anillo,bar plus ring; the "disc" (b/a 0.41) fits the bar and the bulge dominates the outskirts; strong ring residual
+775692190536980608,1,vecino,S0-like: round n=5.5 bulge plus flat disc (b/a 0.33); disc above bulge at 2.5-20"; ellipticity rises to disc value; companion masked
+775692740292789770,1,estructura,compact n=1 bulge plus round extended disc; crossing at ~3"; dipole residual inside 5"
+775692877731744055,1,,edge-on S0: n=3.8 bulge plus flat disc (b/a 0.32); disc above bulge at 4-20"; ellipticity rises to 0.6
+775692877731745290,1,estructura,compact bulge plus extended disc; crossing at ~6"; disc clearly dominates; faint inner spiral residual
+775692877731745361,0,barra,chi2nu 1.57; elongated n=5.5 "bulge" (b/a 0.45) flatter than disc; strong quadrupole bar residual inside 6"; bulge retakes outskirts
+775693633645988109,3,barra;estructura,B/T 0.07 needle component (b/a 0.34) never dominates; clumpy disc; 1c n=1.2 equivalent
+775693977243372062,1,anillo,borderline: disc only modestly above bulge at 4-13" and n_b=5.2 bulge retakes outskirts; ellipticity rises outward; concentric ring-like residual
+775694045962847699,1,vecino,compact n=0.5 core (Re 1.6") plus disc 3x larger; crossing at ~3"; single Sersic underfits outskirts; clean residual
+775694801877092698,3,,similar Re (1.75 vs 2.36") and same b/a and PA; neither component dominates; 1c n=1.45 equivalent
+775699818398896725,3,vecino,B/T 0.15 n=0.64 core only equals the disc at the centre; faint; 1c n=1.5 equivalent
+775705178518079164,3,,bulge dominates out to ~10"; same b/a; disc only marginally above at 10-20"; single n=3.3 equivalent
+775711981746274511,0,barra,compact bulge plus round disc cross at ~3" but strong four-lobed bar/lens residual inside 6" (ellipticity bump 0.3 at 5"); borderline with accepted+bar
+777334998347828286,1,estructura;artefacto;vecino,compact bulge plus disc; crossing at ~2.5"; disc dominates; arm/ring residuals; chi2nu 1.71 inflated by a saturated star with spikes at 15"
+777335754262075377,0,barra;estructura;vecino,needle "bulge" (b/a 0.41) in a round disc is a bar (ellipticity 0.33 at 2-3"); strong S-shaped residual; companion at 8"
+777339190235911320,3,,n_b=0.55 with similar Re (1.85 vs 2.19") and same PA: one inclined disc split in two; 1c n=0.75 equivalent
+777339877430657052,3,estructura,B/T 0.84 n=0.7 "bulge" is the disc itself; single n=0.73 with same Re and b/a; edge-on disc
+777340427186487341,1,,S0-like: compact round bulge plus flat disc (b/a 0.40); crossing at ~3"; ellipticity rises to disc value; clean residual
+777340702064398900,1,barra,elongated n=3 bulge (b/a 0.39) in a round disc - ellipticity bump at 4" suggests bar/lens; crossing at ~2.5"; disc dominates; clean residual
+777341114381255669,3,,both round; n_b=4.8 bulge dominates; disc only marginally above at 5-15"; single n=4.8 equivalent: elliptical
+777343519562940394,1,vecino,borderline S0-like: n=4.6 bulge plus flatter disc (b/a 0.49); disc above bulge at 4-20" by ~0.5 mag; ellipticity rises outward; neighbour at 12"
+777344206757709355,3,vecino,same b/a for both; disc only ~0.5 mag above bulge at 4-15"; single n=4.9 equivalent; borderline with accepted
+777344275477188854,3,,B/T 0.73 bulge dominates; disc only equals it at 10-20"; single n=3.9 equivalent
+777344687794045408,3,,same b/a; bulge dominates to 8" and retakes beyond 20"; single n=5.0 equivalent
+777345787305676199,0,barra;anillo,chi2nu 1.69; strong quadrupole bar residual inside 8" plus ring at ~10"; ellipticity peak 0.5 at 6"
+777348742243172575,3,barra,"bulge" (b/a 0.34) flatter than disc (0.58); disc only marginally above at 4-12"; single n=4.6 equivalent; borderline

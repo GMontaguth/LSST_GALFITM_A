@@ -134,9 +134,10 @@ for k in nombres(BANDA):
     P[k] = col(nombres(BANDA)[k]).fillna(col(nombres(BANDA_RESPALDO)[k]))
 P['D_RS'] = P['D_RS'].fillna(P['D_RE'] / 1.678)
 P['D_RE'] = P['D_RE'].fillna(1.678 * P['D_RS'])
-c_fwhm = [c for c in f.columns if 'fwhm' in c.lower() and 'kpc' not in c.lower()]
+# FWHM de la PSF en píxeles: FWHM_PSF primero. RE_B_FWHM (cociente R_e,b / FWHM) y FWHM_KPC no son la FWHM.
+c_fwhm = [c for c in f.columns if c.lower().startswith('fwhm') and 'kpc' not in c.lower()]
 FWHM = pd.Series(np.nan, index=f.index)
-for c in sorted(c_fwhm, key=lambda c: (BANDA not in c.lower(), c)):
+for c in sorted(c_fwhm, key=lambda c: (c != 'FWHM_PSF', c)):
     FWHM = FWHM.fillna(pd.to_numeric(f[c], errors='coerce'))
 FWHM = FWHM.fillna(FWHM_DEFECTO_PIX)
 print(f'FWHM de la PSF: {"columna " + ", ".join(c_fwhm) if c_fwhm else f"valor por defecto {FWHM_DEFECTO_PIX} px"}')

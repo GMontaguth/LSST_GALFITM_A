@@ -85,6 +85,7 @@ SS_CSV = os.path.join(AG, 'crossmatch', 'galfitm_x_lsst.csv')       # ajuste de 
 SS_PATRONES = ['{oid}_galfitm_out.fits', '{oid}_galfitm*out*.fits', '{oid}*sersic*out*.fits']
 COMP = os.path.join(AG, 'bd', 'masa_tamano', 'componentes_masas.csv')
 SALIDA = os.path.join(AG, 'bd', 'filtro', 'inspeccion_visual.csv')
+SALIDA_CLAUDE = os.path.join(AG, 'bd', 'filtro', 'inspeccion_visual_claude.csv')   # segundo clasificador (solo --unir --final)
 PNG_DIR = os.path.join(AG, 'bd', 'filtro', 'inspeccion_png')
 SUFIJO = '_galfitm_bd_out.fits'
 
@@ -115,6 +116,9 @@ ap.add_argument('--resumen', action='store_true')
 ap.add_argument('--incluir-auto', action='store_true',
                 help='mostrar también las que filtro_una_componente.py ya pasó a una componente')
 ap.add_argument('--unir', action='store_true')
+ap.add_argument('--final', action='store_true',
+                help='con --unir: agrega además visual_ok_final, visual_fuente y visual_etiquetas_final '
+                     '(tu decisión; si no hay, la de Claude; si no, la automática de una componente)')
 ap.add_argument('--semilla', type=int, default=42)
 ap.add_argument('--idioma', choices=['en', 'es'], default='en', help='textos de la figura (en = inglés)')
 ap.add_argument('--limpia', action='store_true',
@@ -146,6 +150,19 @@ def guardar_inspeccion(v):
     os.replace(tmp, SALIDA)           # escritura atómica: no se corrompe si se corta
 
 
+COLS_DEC = ['visual', 'visual_ok', 'visual_etiquetas', 'categoria_bd', 'banda_vista', 'fecha']
+
+
+def guardar_decision(oid, valores):
+    """Guarda UNA decisión sin pisar el resto: vuelve a leer el CSV del disco, cambia solo la
+    fila de esta galaxia y lo reescribe. Así dos ventanas abiertas a la vez (o una ventana
+    abierta desde antes) no se borran las decisiones entre sí. Devuelve la tabla actualizada."""
+    t = leer_inspeccion()
+    t.loc[oid, COLS_DEC] = valores
+    guardar_inspeccion(t)
+    return t
+
+
 def resumen(v, total=None):
     print(f'\nRevisadas: {len(v)}' + (f' de {total}' if total else ''))
     if len(v):
@@ -162,6 +179,18 @@ if args.unir:
     if v.empty:
         sys.exit('Todavía no hay inspección guardada.')
     cols = ['visual', 'visual_ok', 'visual_etiquetas']
+    cols_fin = ['visual_ok_final', 'visual_fuente', 'visual_etiquetas_final']
+    if args.final:
+        # prioridad: humana > claude > auto (filtro_una_componente.py: una_comp_motivo no vacío -> 3)
+        vc = pd.DataFrame(columns=['visual_ok', 'visual_etiquetas']).rename_axis('objectId')
+        if os.path.exists(SALIDA_CLAUDE):
+            vc = pd.read_csv(SALIDA_CLAUDE, dtype={'objectId': str, 'visual_etiquetas': str}) \
+                .drop_duplicates('objectId', keep='last').set_index('objectId')
+        else:
+            print(f'(no existe {SALIDA_CLAUDE}: solo se usan tus decisiones y la clase automática)')
+        fa = leer(FILTRO)
+        auto = set(fa.objectId[fa.una_comp_motivo.fillna('').astype(str) != '']) if 'una_comp_motivo' in fa else set()
+        disco_puro = set(fa.objectId[fa.categoria_bd == 'disco_puro']) if 'categoria_bd' in fa else set()
     for p in (FILTRO, COMP):
         if not os.path.exists(p):
             print(f'(no existe {p}, se omite)')
@@ -172,8 +201,27 @@ if args.unir:
         t = leer(p)
         t = t.drop(columns=[c for c in cols if c in t]).merge(v[cols].reset_index(), on='objectId', how='left')
         t['visual'] = t.visual.fillna('sin_revisar')
+        t = t.drop(columns=[c for c in cols_fin if c in t])     # sin --final no quedan columnas finales viejas
+        if args.final:
+            oid = t.objectId
+            en_h, en_c, en_a = oid.isin(v.index), oid.isin(vc.index), oid.isin(auto)
+            t['visual_ok_final'] = np.select(
+                [en_h, en_c, en_a],
+                [pd.to_numeric(oid.map(v.visual_ok), errors='coerce'), pd.to_numeric(oid.map(vc.visual_ok), errors='coerce'), 3.0],
+                np.nan)
+            # disco_puro es una componente por definición: "aceptada" (1) ahí significa que el ajuste de
+            # una componente es bueno -> 3 (solo en la columna final; visual_ok queda como se guardó)
+            dp1 = oid.isin(disco_puro) & (t.visual_ok_final == 1)
+            t.loc[dp1, 'visual_ok_final'] = 3.0
+            t['visual_fuente'] = np.select([en_h, en_c, en_a], ['humana', 'claude', 'auto'], '')
+            t['visual_etiquetas_final'] = np.where(en_h, oid.map(v.visual_etiquetas).fillna(''),
+                                                   np.where(en_c, oid.map(vc.visual_etiquetas).fillna(''), ''))
         t.to_csv(p, index=False)
         print(f'{p}: {t.visual.value_counts().to_dict()}')
+        if args.final:
+            print(f'  disco_puro con 1 -> 3 en visual_ok_final: {int(dp1.sum())}')
+            print('  final por fuente:\n' + pd.crosstab(t.visual_fuente.replace('', 'ninguna'),
+                                                        t.visual_ok_final.fillna(-1).astype(int).replace(-1, 'sin')).to_string())
     sys.exit(0)
 
 if args.resumen:
@@ -765,11 +813,10 @@ def on_key(ev):
     oid = sel.objectId.iloc[st['i']]
     if k in DECISION:
         val = DECISION[k]
-        v.loc[oid, ['visual', 'visual_ok', 'visual_etiquetas', 'categoria_bd', 'banda_vista', 'fecha']] = [
+        v = guardar_decision(oid, [
             NOMBRE[val], val, ';'.join(sorted(st['etiquetas'])),
             sel.categoria_bd.iloc[st['i']] if 'categoria_bd' in sel else '',
-            st.get('banda_vista', ''), datetime.now().isoformat(timespec='seconds')]
-        guardar_inspeccion(v)
+            st.get('banda_vista', ''), datetime.now().isoformat(timespec='seconds')])
         print(f'{oid}: {NOMBRE[val]} {sorted(st["etiquetas"]) or ""}')
         if st['i'] == len(sel) - 1:
             print('Era la última galaxia.')
@@ -816,7 +863,7 @@ fig.canvas.mpl_connect('key_press_event', on_key)
 cargar_previa()
 refrescar()
 plt.show()
-guardar_inspeccion(v) if len(v) else None
+v = leer_inspeccion()                  # cada decisión ya se guardó; aquí solo se relee (no se pisa el disco)
 resumen(v[v.index.isin(sel.objectId)], total=len(sel))
 print(f'\nGuardado en {SALIDA}')
 print('Para pasarlo a las tablas:  python3 inspeccion_visual_bd.py --unir')
