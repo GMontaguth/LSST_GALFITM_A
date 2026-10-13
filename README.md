@@ -1,13 +1,15 @@
 # Pipeline GalfitM + statmorph + bulbo/disco — LSST DP2 (z < 0.1)
 
 Desde la descarga de las imágenes en el RSP (paso 0) hasta la medición no
-paramétrica con **statmorph** y la descomposición **bulbo + disco** con GalfitM,
-para galaxias con redshift espectroscópico a z < 0.1.
+paramétrica con **statmorph**, la descomposición **bulbo + disco** con GalfitM
+y la **clasificación** de esas descomposiciones, para galaxias con redshift
+espectroscópico a z < 0.1.
 
 El pipeline está pensado para trabajar **por partes**: las galaxias se descargan
 por lotes, se agrupan en carpetas de trabajo (`galaxias_1_9`, `galaxias_10_22`...)
 y cada vez que se suma una carpeta, un solo comando (`actualizar_todo.py`) corre
-**solo lo que falta**.
+**solo lo que falta** (pasos 3 a 8). La clasificación bulbo + disco (pasos 9 a 13)
+se corre después, a mano, desde `analisis_conjunto/`.
 
 ---
 
@@ -24,8 +26,14 @@ y cada vez que se suma una carpeta, un solo comando (`actualizar_todo.py`) corre
 | 6 | `analisis_conjunto/` | `procesar_muestra.py` | Cortes de calidad, cruce con LSST y categorías A/B/C/D |
 | 7 | `analisis_conjunto/` | `statmorph_completo.py` | statmorph-lsst para las galaxias A + B |
 | 8 | `analisis_conjunto/` | `generar_bd_feedmes.py` + `correr_bd.sh` | Bulbo + disco con GalfitM para las galaxias A + B |
+| 9 | `analisis_conjunto/` | `leer_output_bd.py` | Lee las salidas bulbo + disco → `galfitm_bd_resultados.csv` |
+| 10 | `analisis_conjunto/` | `filtro_bd.py` | Clasifica cada descomposición (`bd_ok`, `bulbo_no_resuelto`, `invertida`...) |
+| 11 | `analisis_conjunto/` | `generar_bd_refit.py` + `correr_bd.sh` | (opcional) 2.º ajuste `_bd2` para rescatar invertidas, fallidas y bulbos absurdos |
+| 12 | `analisis_conjunto/` | `filtro_una_componente.py` | Reasigna las que en realidad son de una componente (elípticas, discos duplicados) |
+| 13 | `analisis_conjunto/` | `inspeccion_visual_bd.py` | Inspección visual interactiva y columna `visual_ok` |
 
 Los pasos 3 a 8 los coordina **`actualizar_todo.py`** (ver [Uso diario](#uso-diario-actualizar_todopy)).
+Los pasos 9 a 13 se corren en ese orden (ver [Clasificación bulbo + disco](#clasificación-bulbo--disco-pasos-9-a-13)).
 
 ---
 
@@ -50,11 +58,24 @@ Galfitm/
     ├── procesar_muestra.py
     ├── statmorph_completo.py
     ├── generar_bd_feedmes.py
+    ├── generar_bd_refit.py
     ├── correr_bd.sh
+    ├── leer_output_bd.py
+    ├── filtro_bd.py
+    ├── filtro_una_componente.py
+    ├── inspeccion_visual_bd.py
     ├── correr_galfitm_paralelo.sh
     ├── leer_output_galfitm.py
     ├── galfitm-1.4.4-linux-x86_64
     └── analisis_galfitm/                # resultados (tablas y figuras)
+        ├── muestra/                     # paso 6
+        ├── statmorph_corridas/          # paso 7
+        ├── statmorph_resultados.csv     # paso 7
+        └── bd/
+            ├── galfitm_bd_resultados.csv    # paso 9 (1er ajuste)
+            ├── galfitm_bd2_resultados.csv   # paso 11 (2do ajuste, si existe)
+            ├── imagenes/                    # figuras de leer_output_bd.py
+            └── filtro/                      # pasos 10, 12 y 13
 ```
 
 Contenido de cada carpeta de galaxia (`galfitm_inputs/<objectId>/`):
@@ -66,6 +87,7 @@ Contenido de cada carpeta de galaxia (`galfitm_inputs/<objectId>/`):
 | `<ID>_galfitm_out.fits`, `<ID>_galfit.01`, `galfitm_<ID>.log` | paso 3 |
 | `<ID>_bd.feedme`, `<ID>_bd.constraints` | paso 8 |
 | `<ID>_galfitm_bd_out.fits`, `<ID>_bd_galfit.01`, `galfitm_bd_<ID>.log` | paso 8 |
+| `<ID>_bd2.feedme`, `<ID>_bd2.constraints`, `<ID>_galfitm_bd2_out.fits`, `galfitm_bd2_<ID>.log` | paso 11 (solo las reajustadas) |
 
 ## Requisitos
 
@@ -301,7 +323,198 @@ Recetas alternativas: `'v2'` (versión DP1) y `'proporcional'`.
 Lee `lista_bd.txt`, corre GalfitM **dentro de la carpeta de cada galaxia**,
 renombra `galfit.NN` → `<ID>_bd_galfit.NN`, salta las que ya tienen
 `<ID>_galfitm_bd_out.fits` (reanudable) y deja `progreso_bd.txt` y
-`fallidas_bd.txt`.
+`fallidas_bd.txt`. Con `SUFIJO=_bd2` corre el 2.º ajuste (paso 11).
+
+---
+
+## Clasificación bulbo + disco (pasos 9 a 13)
+
+Todo desde `analisis_conjunto/`, en este orden:
+
+```bash
+python3 leer_output_bd.py                     # 9.  lee las descomposiciones
+python3 filtro_bd.py                          # 10. clasifica
+# 11. (opcional) 2do ajuste de las que fallaron, y volver a leer + filtrar:
+#     python3 generar_bd_refit.py --prueba 20 && SUFIJO=_bd2 ./correr_bd.sh 3
+#     python3 leer_output_bd.py --sufijo _bd2 && python3 filtro_bd.py
+python3 filtro_una_componente.py --solo-ver   # 12. cuenta cuántas reasignaría
+python3 filtro_una_componente.py              #     aplica
+python3 inspeccion_visual_bd.py               # 13. inspección visual
+python3 inspeccion_visual_bd.py --unir        #     agrega visual_ok a las tablas
+```
+
+> **Si vuelves a correr `filtro_bd.py`, repite después `filtro_una_componente.py`
+> e `inspeccion_visual_bd.py --unir`.** La inspección visual vive en su propio
+> archivo, así que no se pierde.
+
+## Paso 9 — Leer salidas bulbo + disco (`leer_output_bd.py`)
+
+Lee el header de cada `<ID>_galfitm_bd_out.fits` de todas las carpetas
+`galaxias_*` y crea `analisis_galfitm/bd/galfitm_bd_resultados.csv` (una fila por
+galaxia):
+
+- por banda: `B_MAG, B_RE, B_N, B_AR, B_PA` (bulbo), `D_MAG, D_RS, D_RE, D_AR, D_PA`
+  (disco, con R_e = 1.678 R_s), `BT`, `MAG_TOT`, `RATIO_RE` (R_e,b / R_e,d);
+- `chi2nu`, `params_flag` (parámetros marcados con `*`), `bandas`, `carpeta`.
+
+Si el disco es un Sérsic con n = 1 (2.º ajuste), su `RE` se convierte a R_s.
+
+```bash
+python3 leer_output_bd.py                    # solo lee las nuevas
+python3 leer_output_bd.py --imagenes 50      # + figuras de 50 galaxias nuevas
+python3 leer_output_bd.py --ids analisis_galfitm/bd/filtro/revisar_invertida.csv
+                                             # figuras de esa lista (imagenes/revisar_invertida/)
+python3 leer_output_bd.py --sufijo _bd2      # 2.º ajuste → galfitm_bd2_resultados.csv
+```
+
+## Paso 10 — Clasificación (`filtro_bd.py`)
+
+Filtro lógico basado en **Vika et al. (2014)** y adaptado a la resolución de LSST,
+pensado para la relación masa–tamaño de bulbos y discos. Usa la banda **r** como
+referencia (i si falta): R_e, n, b/a y PA son constantes en λ, así que basta una.
+
+Cada galaxia recibe **una sola categoría**, la del primer criterio que cumple, en
+este orden:
+
+| # | Categoría | Condición | Qué se usa |
+|---|---|---|---|
+| 1 | `fallida` | R_e, n, b/a del bulbo o R_s, b/a del disco marcados con `*`; χ²/ν fuera de 0.5–5; \|m(B+D) − m(single-Sérsic)\| > 0.3 mag; B/T vacío; o (2.º ajuste) solución pegada al borde de las restricciones | descartar o reajustar |
+| 2 | `perturbada` | asimetría de statmorph A > 0.35 (Conselice 2003) | descartar (fusión, interacción, vecino) |
+| 3 | `invertida` | R_e,b ≥ R_e,d: las componentes intercambiaron papeles | reajustar (paso 11) |
+| 4 | `esferoide_puro` | B/T ≥ 0.94 | single-Sérsic |
+| 5 | `disco_puro` | B/T ≤ 0.06 | single-Sérsic como disco |
+| 6 | `disco_absurdo` | R_e,d > 3 × R_e del single-Sérsic (el disco ajusta cielo o halo) | descartar |
+| 7 | `posible_barra` | n_b < 0.7, (b/a)_b < 0.5, \|ΔPA\| > 20° y R_e,b < R_e,d | excluir (comparación con muestras sin barras) |
+| 8 | `bulbo_aguja` | (b/a)_b < 0.2: barra, disco interno o artefacto | excluir |
+| 9 | `disco_de_canto` | (b/a)_d < 0.3: B+D no confiable de canto | excluir |
+| 10 | `bulbo_absurdo` | n_b < 0.3 o n_b > 8 | reajustar (paso 11) |
+| 11 | `bulbo_no_resuelto` | R_e,b < 1 FWHM de la PSF | B/T y disco sí; tamaño del bulbo como **límite superior** |
+| 12 | `bd_ok` | pasa todo | **muestra para el análisis** |
+
+Detalles:
+
+- **FWHM de la PSF**: se mide en la PSF de cada galaxia (`<ID>_psf_<b>.fits`) como
+  2√(A/π), con A el área sobre la mitad del máximo. Se guarda en `psf_fwhm.csv` y
+  solo se miden las nuevas.
+- **Asimetría**: se toma de `statmorph_resultados.csv` en r, i o g (la primera con
+  `flag ≤ 1` y S/N ≥ 2.5). Si no existe la tabla, el corte no se aplica.
+- Cada criterio queda además en una columna booleana `corte_*`, para poder
+  recombinarlos sin volver a correr nada.
+- Si hay z, calcula `RE_B_KPC`, `RE_D_KPC` y `FWHM_KPC`.
+- Si existe `galfitm_bd2_resultados.csv`, clasifica los dos ajustes y se queda,
+  para cada galaxia, con el de **mejor categoría** (en empate, el 1.º). La columna
+  `ajuste` (`bd` / `bd2`) dice de cuál viene, y en pantalla sale una tabla de
+  rescate (categoría con el 1.º → con el 2.º).
+
+Variantes (cada una en su subcarpeta, p. ej. `filtro/ba_min_0.5/`; `psf_fwhm.csv`
+se comparte):
+
+```bash
+python3 filtro_bd.py --fwhm-min 1.5     # resolución más exigente
+python3 filtro_bd.py --ba-min 0.5       # además disco poco inclinado → si no, 'disco_inclinado'
+python3 filtro_bd.py --banda i          # otra banda de referencia
+```
+
+Salidas en `analisis_galfitm/bd/filtro/`:
+
+| Archivo | Contenido |
+|---|---|
+| `galfitm_bd_filtrado.csv` | todas, con `categoria_bd`, `ajuste` y columnas `corte_*` |
+| `muestra_bd_ok.csv` | solo `bd_ok` |
+| `revisar_<categoria>.csv` | 20 al azar de cada categoría (para `--ids`) |
+| `psf_fwhm.csv` | caché de la FWHM de la PSF |
+| `22_filtro_bd.png` | diagnósticos: B/T, R_e,b/R_e,d, n_b, R_e,b/FWHM, R_e,b vs R_e,d, conteo por categoría |
+
+En pantalla: conteo por categoría, cuántas fallan cada corte, medianas de `bd_ok`,
+cuántas `bd_ok` tienen R_e,b ≥ 1.5 y ≥ 2 FWHM, y la tabla categoría × tipo
+morfológico (ETG/LTG/TG/OG).
+
+## Paso 11 — 2.º ajuste (`generar_bd_refit.py`, opcional)
+
+Rehace el ajuste de las `invertida`, `bulbo_absurdo` y `fallida` (con
+`--color-malo` también las que tuvieron masa con el color de la galaxia o masa
+inconsistente). Usa archivos propios (`_bd2`), así que **el 1.º ajuste no se toca**.
+
+| Problema del 1.º ajuste | Qué cambia en el 2.º |
+|---|---|
+| Invertidas | Restricción de cociente `1/2 re 0.02 0.9` (R_e,b ≤ 0.9 R_e,d). Para usarla, el disco pasa a Sérsic con n = 1 fijo (mismo perfil que el expdisk, pero con `re`) |
+| n del bulbo absurdo | n_b en 0.3–8, empieza en n = 2 |
+| Componentes que desaparecen en una banda | magnitudes como polinomio suave en λ (lineal con ≤ 4 bandas, cuadrático con ≥ 5) y `1-2 mag -3 3` (0.06 < B/T < 0.94 en cada banda) |
+| Bulbos de menos de un píxel | R_e,b ≥ 0.5 px |
+| Inicio que favorece la inversión | bulbo chico y débil (0.2 R_e,ss, m_ss + 1.5), disco grande y brillante (1.2 R_e,ss, m_ss + 0.4) |
+
+```bash
+python3 generar_bd_refit.py --prueba 20     # primero 20 al azar
+SUFIJO=_bd2 ./correr_bd.sh 3
+python3 leer_output_bd.py --sufijo _bd2 --ver 20
+python3 filtro_bd.py
+python3 generar_bd_refit.py                 # si la prueba salió bien: todas
+```
+
+En la prueba, revisar que el log `galfitm_bd2_<ID>.log` no tenga errores al leer
+las restricciones y que en los resultados R_e,b/R_e,d ≤ 0.9 y B/T por banda quede
+en 0.06–0.94. Una solución pegada a esos bordes (cociente > 0.88, n en el límite
+o |Δm| > 2.95) la forzó la restricción y no los datos: `filtro_bd.py` la marca
+como `fallida`.
+
+## Paso 12 — Galaxias de una componente (`filtro_una_componente.py`)
+
+Revisa las `bd_ok` y `bulbo_no_resuelto` y reasigna las que en realidad se
+describen con **una sola componente**, usando categorías que el resto del
+pipeline ya entiende:
+
+| Criterio | Condición | Pasa a |
+|---|---|---|
+| `sin_cruce` | el bulbo domina el brillo superficial en todos los radios entre 0.5 FWHM y 3 R_e,d (perfiles 1D de cada componente): el "disco" solo corrige el perfil de una elíptica | `esferoide_puro` |
+| `disco_duplicado` | n_b < 1.5, R_e,b/R_e,d > 0.6, \|Δ(b/a)\| < 0.1 y \|ΔPA\| < 10° (el PA no se exige si las dos tienen b/a > 0.85): el mismo disco repartido en dos exponenciales | `disco_puro` |
+
+- Agrega a `galfitm_bd_filtrado.csv`: `categoria_bd_antes`, `una_comp_motivo`,
+  `corte_sin_cruce`, `corte_disco_duplicado` y `r_disco_domina_arcsec`.
+- Reescribe `muestra_bd_ok.csv` y deja `revisar_sin_cruce.csv` y
+  `revisar_disco_duplicado.csv` (20 al azar) para verificarlas a ojo.
+- Se puede correr varias veces: siempre parte de lo que dejó `filtro_bd.py`.
+- Umbrales al principio del script: `R_MAX_RED`, `DUP_N_MAX`, `DUP_RATIO_MIN`,
+  `DUP_DQ_MAX`, `DUP_DPA_MAX`, `DUP_Q_REDONDA`.
+
+## Paso 13 — Inspección visual (`inspeccion_visual_bd.py`)
+
+Ventana interactiva para aceptar o rechazar cada descomposición. Por defecto
+muestra `bd_ok`, `bulbo_no_resuelto` y `disco_puro` (sin las reasignadas
+automáticamente en el paso 12), ordenadas por categoría.
+
+Cada figura muestra: imagen, modelo B+D, residuo y residuo relativo; bulbo,
+disco y perfil radial en anillos elípticos (dato, modelo, bulbo y disco);
+elipses del R_e del bulbo (rojo) y del disco (azul), con la misma escala de
+brillo en imagen, modelo y componentes.
+
+| Tecla | Acción |
+|---|---|
+| `a` / `1` | aceptar |
+| `x` / `0` | rechazar |
+| `d` / `2` | dudosa |
+| `b` `o` `v` `s` `e` `i` | etiquetas: barra, anillo, vecino, estructura, artefacto, componentes intercambiadas (antes de decidir) |
+| `→` / `←` | moverse sin decidir |
+| `n` | próxima sin revisar |
+| `f` | cambiar de banda |
+| `+` / `-` | acercar / alejar |
+| `q` | salir |
+
+El progreso se guarda después de cada decisión en
+`analisis_galfitm/bd/filtro/inspeccion_visual.csv` (escritura atómica): al volver
+a abrirlo empieza en la primera sin revisar.
+
+```bash
+python3 inspeccion_visual_bd.py --revisar dudosa     # volver a ver las dudosas
+python3 inspeccion_visual_bd.py --orden azar
+python3 inspeccion_visual_bd.py --ids analisis_galfitm/bd/filtro/revisar_sin_cruce.csv
+python3 inspeccion_visual_bd.py --png 50             # sin ventana: guarda 50 PNG
+python3 inspeccion_visual_bd.py --resumen            # cuántas llevas, por decisión y etiqueta
+python3 inspeccion_visual_bd.py --unir               # agrega las columnas a las tablas
+```
+
+`--unir` agrega `visual`, `visual_ok` (1 = aceptada, 0 = rechazada, 2 = dudosa,
+vacío = sin revisar) y `visual_etiquetas` a `galfitm_bd_filtrado.csv` y a
+`componentes_masas.csv`, guardando la primera vez una copia `.bak` de cada tabla.
 
 ---
 
@@ -315,6 +528,9 @@ carpeta o un nivel arriba) y corre solo lo pendiente:
 2. `combinar_carpetas.py` y `procesar_muestra.py` (cachés: solo mide lo nuevo);
 3. statmorph y bulbo + disco **solo** para las A + B que no los tienen;
 4. une los resultados de statmorph.
+
+La clasificación bulbo + disco (pasos 9 a 13) **no** la corre: después de
+`actualizar_todo.py`, correrla a mano (ver arriba).
 
 ```bash
 python3 actualizar_todo.py --listar                 # qué falta, sin correr nada
