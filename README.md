@@ -8,7 +8,7 @@ espectroscópico a z < 0.1.
 El pipeline está pensado para trabajar **por partes**: las galaxias se descargan
 por lotes, se agrupan en carpetas de trabajo (`galaxias_1_9`, `galaxias_10_22`...)
 y cada vez que se suma una carpeta, un solo comando (`actualizar_todo.py`) corre
-**solo lo que falta** (pasos 3 a 8). La clasificación bulbo + disco (pasos 9 a 13)
+**solo lo que falta** (pasos 3 a 8). La clasificación bulbo + disco (pasos 9 a 14)
 se corre después, a mano, desde `analisis_conjunto/`.
 
 ---
@@ -31,9 +31,10 @@ se corre después, a mano, desde `analisis_conjunto/`.
 | 11 | `analisis_conjunto/` | `generar_bd_refit.py` + `correr_bd.sh` | (opcional) 2.º ajuste `_bd2` para rescatar invertidas, fallidas y bulbos absurdos |
 | 12 | `analisis_conjunto/` | `filtro_una_componente.py` | Reasigna las que en realidad son de una componente (elípticas, discos duplicados) |
 | 13 | `analisis_conjunto/` | `inspeccion_visual_bd.py` | Inspección visual interactiva y columna `visual_ok` |
+| 14 | `analisis_conjunto/` | Claude Code (terminal) | Clasificación visual asistida: calibración a ciegas contra la humana y clasificación del resto |
 
 Los pasos 3 a 8 los coordina **`actualizar_todo.py`** (ver [Uso diario](#uso-diario-actualizar_todopy)).
-Los pasos 9 a 13 se corren en ese orden (ver [Clasificación bulbo + disco](#clasificación-bulbo--disco-pasos-9-a-13)).
+Los pasos 9 a 14 se corren en ese orden (ver [Clasificación bulbo + disco](#clasificación-bulbo--disco-pasos-9-a-14)).
 
 ---
 
@@ -75,7 +76,10 @@ Galfitm/
             ├── galfitm_bd_resultados.csv    # paso 9 (1er ajuste)
             ├── galfitm_bd2_resultados.csv   # paso 11 (2do ajuste, si existe)
             ├── imagenes/                    # figuras de leer_output_bd.py
-            └── filtro/                      # pasos 10, 12 y 13
+            └── filtro/                      # pasos 10, 12, 13 y 14
+                ├── inspeccion_visual.csv         # decisiones humanas
+                ├── inspeccion_visual_claude.csv  # decisiones de Claude
+                └── inspeccion_png/               # figuras (--png)
 ```
 
 Contenido de cada carpeta de galaxia (`galfitm_inputs/<objectId>/`):
@@ -327,7 +331,7 @@ renombra `galfit.NN` → `<ID>_bd_galfit.NN`, salta las que ya tienen
 
 ---
 
-## Clasificación bulbo + disco (pasos 9 a 13)
+## Clasificación bulbo + disco (pasos 9 a 14)
 
 Todo desde `analisis_conjunto/`, en este orden:
 
@@ -341,6 +345,8 @@ python3 filtro_una_componente.py --solo-ver   # 12. cuenta cuántas reasignaría
 python3 filtro_una_componente.py              #     aplica
 python3 inspeccion_visual_bd.py               # 13. inspección visual
 python3 inspeccion_visual_bd.py --unir        #     agrega visual_ok a las tablas
+# 14. clasificación asistida con Claude Code (ver abajo), y después:
+python3 inspeccion_visual_bd.py --unir --final   # visual_ok_final (humana > Claude > auto)
 ```
 
 > **Si vuelves a correr `filtro_bd.py`, repite después `filtro_una_componente.py`
@@ -479,8 +485,9 @@ pipeline ya entiende:
 ## Paso 13 — Inspección visual (`inspeccion_visual_bd.py`)
 
 Ventana interactiva para aceptar o rechazar cada descomposición. Por defecto
-muestra `bd_ok`, `bulbo_no_resuelto` y `disco_puro` (sin las reasignadas
-automáticamente en el paso 12), ordenadas por categoría.
+muestra `bd_ok`, `bulbo_no_resuelto` y `disco_puro`, ordenadas por categoría.
+Omite las que `filtro_una_componente.py` ya reasignó como una componente (avisa
+cuántas son); con `--incluir-auto` también las muestra.
 
 Cada figura muestra: imagen, modelo B+D, residuo y residuo relativo; bulbo,
 disco y perfil radial en anillos elípticos (dato, modelo, bulbo y disco);
@@ -492,6 +499,7 @@ brillo en imagen, modelo y componentes.
 | `a` / `1` | aceptar |
 | `x` / `0` | rechazar |
 | `d` / `2` | dudosa |
+| `u` / `3` | una componente (el ajuste no es malo, pero no hacen falta dos componentes) |
 | `b` `o` `v` `s` `e` `i` | etiquetas: barra, anillo, vecino, estructura, artefacto, componentes intercambiadas (antes de decidir) |
 | `→` / `←` | moverse sin decidir |
 | `n` | próxima sin revisar |
@@ -513,8 +521,612 @@ python3 inspeccion_visual_bd.py --unir               # agrega las columnas a las
 ```
 
 `--unir` agrega `visual`, `visual_ok` (1 = aceptada, 0 = rechazada, 2 = dudosa,
-vacío = sin revisar) y `visual_etiquetas` a `galfitm_bd_filtrado.csv` y a
-`componentes_masas.csv`, guardando la primera vez una copia `.bak` de cada tabla.
+3 = una componente, vacío = sin revisar) y `visual_etiquetas` a
+`galfitm_bd_filtrado.csv` y a `componentes_masas.csv`, guardando la primera vez
+una copia `.bak` de cada tabla.
+
+## Paso 14 — Clasificación visual asistida con Claude (Claude Code)
+
+Para no revisar a mano las ~1500 descomposiciones, se usa **Claude Code** en la
+terminal como segundo clasificador. Trabaja directamente en `analisis_conjunto/`:
+genera las figuras con el inspector, las mira una por una y escribe sus
+decisiones con los mismos códigos y etiquetas. **La clasificación humana manda:**
+Claude escribe en un archivo aparte y nunca modifica `inspeccion_visual.csv`.
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash      # instalar (una vez)
+cd "/media/gissel/Sem Título/DP2_LSST/Galfitm/analisis_conjunto"
+claude                                              # iniciar sesión y aceptar la carpeta
+```
+
+### Procedimiento
+
+1. **Criterios comunes.** Claude recibe los mismos criterios que la inspección
+   humana (abajo) y lee el código de `inspeccion_visual_bd.py` para entender cada
+   panel de la figura.
+2. **Calibración a ciegas.** Clasifica las ~100 galaxias que ya revisé a mano
+   **sin leer** `visual`, `visual_ok` ni `visual_etiquetas` (usa el CSV solo para
+   sacar la lista de `objectId`). Las figuras se generan con `--ids` y
+   `--incluir-auto`, para que no falte ninguna. Después compara: matriz de
+   confusión, **κ de Cohen** y lista de desacuerdos con su razonamiento. También
+   informa cuántas de mis galaxias reasignó automáticamente
+   `filtro_una_componente.py` y si mi decisión coincide con la automática.
+   **Se detiene aquí** hasta que yo apruebe.
+3. **Resto de la muestra.** Si la calibración es buena, clasifica las demás (sin
+   `--incluir-auto`: las reasignadas automáticamente conservan su clase) y guarda
+   en **`analisis_galfitm/bd/filtro/inspeccion_visual_claude.csv`**, con las
+   mismas columnas más `clasificador = claude` y una nota breve por galaxia.
+   Guarda por lotes, así que se puede retomar si se corta.
+4. **Control de lo automático.** Revisa 20 al azar de las reasignadas por
+   `filtro_una_componente.py` (con `--incluir-auto`) e informa si está de acuerdo
+   con la clasificación de una componente.
+5. **Revisión humana.** Reviso las dudosas de Claude y una fracción al azar de
+   sus decisiones.
+
+### Criterios (los mismos para la inspección humana y la de Claude)
+
+| `visual_ok` | Decisión | Criterio |
+|---|---|---|
+| 1 | aceptada | bulbo y disco son componentes reales: en el perfil radial el disco domina en las afueras (las curvas se cruzan), el residuo no tiene estructura fuerte, y R_e y b/a tienen sentido físico |
+| 3 | una componente | el ajuste no es malo, pero no hacen falta dos componentes: el bulbo domina en todos los radios (elípticas, componentes redondas y parecidas) o las dos describen el mismo disco (n_b bajo, R_e, b/a y PA parecidos) |
+| 0 | rechazada | ajuste malo: barra o anillo fuerte mal absorbido, vecino brillante que contamina, o componentes intercambiadas (el "bulbo" más grande y extendido que el disco) |
+| 2 | dudosa | la figura no permite decidir |
+
+- **No** se rechaza solo por el patrón rojo/azul en el centro (< 2″, típico de la
+  PSF), por manchas de vecinos enmascarados ni por el ruido en el borde.
+- Etiquetas (se combinan con cualquier decisión): `b` barra, `o` anillo,
+  `v` vecino, `s` estructura, `e` artefacto, `i` componentes intercambiadas.
+
+### Limitaciones
+
+- Claude clasifica a partir de la **figura PNG**, no del FITS: lo que no se vea
+  con ese estiramiento de brillo tampoco lo ve.
+- No es un clasificador validado. En los casos claros coincide casi siempre; en
+  los límites (barras débiles, anillos sutiles) puede diferir, como dos
+  inspectores humanos. Por eso la calibración no es opcional.
+- Si una decisión humana y una de Claude no coinciden, gana la humana.
+
+### Resultados de la calibración (1.ª ronda, a ciegas)
+
+101 galaxias revisadas a mano; Claude las clasificó con figuras generadas con
+`--limpia` (sin la decisión humana impresa) y solo después leyó las columnas
+humanas. Detalle por galaxia en `analisis_galfitm/bd/filtro/calibracion_claude.csv`.
+
+| humana ↓ / Claude → | 1 aceptada | 3 una comp. | 0 rechazada | 2 dudosa | total |
+|---|---|---|---|---|---|
+| 1 aceptada | 36 | 8 | 9 | 2 | 55 |
+| 3 una componente | 6 | 31 | 0 | 0 | 37 |
+| 0 rechazada | 1 | 0 | 4 | 0 | 5 |
+| 2 dudosa | 3 | 0 | 1 | 0 | 4 |
+| total | 46 | 39 | 14 | 2 | 101 |
+
+| Comparación | Acuerdo | κ de Cohen |
+|---|---|---|
+| Las cuatro clases | 71/101 (70 %) | 0.51 |
+| Sin las dudosas de ninguno de los dos | 71/95 | 0.56 |
+| Aceptada vs. el resto | 72/101 | 0.43 |
+
+Desacuerdos (30), en tres grupos sistemáticos:
+
+1. **Barras (9):** aceptadas a mano con etiqueta `b`, rechazadas por Claude
+   porque el "bulbo" es la propia barra o deja un residuo estructurado.
+2. **Bulbos de n bajo con la forma del disco (8):** aceptadas a mano, una
+   componente para Claude.
+3. **Bulbos compactos y débiles en espirales (6):** una componente a mano,
+   aceptadas por Claude.
+
+Solo 1 de las 101 había sido reasignada por `filtro_una_componente.py`
+(`sin_cruce`), y las tres clasificaciones coinciden. En total hay 139
+reasignadas automáticamente (75 `disco_duplicado` + 64 `sin_cruce`).
+
+Claude marca más etiquetas que la inspección humana (estructura 35 vs. 16, barra
+20 vs. 14, incluidas las 14 humanas).
+
+> El κ reportable es el de esta ronda a ciegas (0.51). Si se cambian las reglas,
+> la concordancia recalculada sobre estas mismas 101 (p. ej. κ ≈ 0.63 aceptando
+> las barras) ya no es ciega: hay que hacer una 2.ª ronda con galaxias nuevas.
+
+Cambio en el código durante la calibración: `inspeccion_visual_bd.py` fallaba
+con galaxias cuyo borde es todo ceros (error en las isofotas); se agregó un
+respaldo de tres líneas para estimar el ruido.
+
+### Mensajes a Claude Code
+
+Registro textual de las instrucciones, en el orden en que se enviaron, para que
+el procedimiento sea reproducible (y para el apéndice del paper).
+
+**Mensaje 1 — instrucciones y calibración a ciegas** (enviado el 2026-10-13).
+
+> Nota: el mensaje dice 75 galaxias reasignadas automáticamente; en la tabla
+> eran 139 (75 `disco_duplicado` + 64 `sin_cruce`), como informó Claude Code.
+
+```
+You will act as my visual classifier for GalfitM bulge+disc decompositions.
+
+Context:
+- The inspection tool is inspeccion_visual_bd.py. Read its code to understand what each
+  figure panel shows (image, model, residual, residual/model, bulge, disc and radial
+  profile) and its options (--png, --ids, --incluir-auto, etc.).
+- My decisions are stored in analisis_galfitm/bd/filtro/inspeccion_visual.csv (I have
+  inspected about 100 galaxies). During calibration, use this file ONLY to get the list
+  of objectIds I inspected; do NOT read the visual, visual_ok or visual_etiquetas
+  columns until you have finished classifying them.
+- filtro_una_componente.py has already classified 75 galaxies as single component
+  automatically; the inspector skips them by default (--incluir-auto shows them).
+- You do not need any notebook.
+
+Classification codes (visual_ok):
+- 1 accepted: the bulge and disc are real components. In the radial profile the disc
+  dominates in the outskirts (the profiles cross), the residual shows no strong
+  structure, and the effective radii and axis ratios are physically meaningful.
+- 3 single component: the fit is not bad, but the galaxy does not require two
+  components. Examples: the bulge dominates at all radii (typical of ellipticals, with
+  both components round and similar), or both components describe the same disc (low
+  n_b, similar R_e, b/a and PA).
+- 0 rejected: the fit is poor. Examples: a strong bar or ring that is poorly absorbed
+  by the model, a bright neighbour contaminating the fit, or swapped components (the
+  "bulge" is larger and more extended than the disc).
+- 2 uncertain: the figure does not allow a decision.
+- Do not reject a galaxy based only on the red/blue pattern in the centre (< 2″,
+  typical of PSF mismatch), on residuals from masked neighbours, or on noise at the
+  outer edge.
+- Flags (can be combined with any decision): b bar, o ring, v neighbour, s structure,
+  e artefact, i swapped components.
+
+Plan:
+1. CALIBRATION: generate figures for ALL the objectIds I inspected, using --ids with my
+   list and --incluir-auto so none of them is left out. Inspect each figure yourself and
+   classify them blind to my decisions. Then compare with mine: confusion matrix,
+   Cohen's kappa, and the list of disagreements with your reasoning. Also report how
+   many of my inspected galaxies were auto-classified as single component and whether
+   my decision agrees with the automatic one. STOP and show me this before continuing.
+2. If I approve, generate figures for the remaining galaxies (without --incluir-auto),
+   classify them, and save them to a SEPARATE file,
+   analisis_galfitm/bd/filtro/inspeccion_visual_claude.csv, with the same columns plus
+   clasificador=claude and a short note per galaxy. Do NOT modify my
+   inspeccion_visual.csv.
+3. The auto-classified galaxies keep their automatic class, but inspect a random
+   subsample of 20 of them (with --incluir-auto) and report whether you agree with the
+   automatic single-component classification.
+4. Save progress in batches so the work can be resumed if interrupted.
+```
+
+**Mensaje 2 — primeras reglas tras la calibración.** Resuelve los tres grupos
+de desacuerdo de la 1.ª ronda y pide una 2.ª ronda a ciegas antes de clasificar
+el resto.
+
+```
+Rule changes after calibration:
+1. Bars: accept with flag b if the bulge is round/aligned and the bar is a separate
+   residual feature. Reject if the "bulge" component itself is the bar (elongated,
+   b/a < ~0.4, misaligned with the disc).
+2. Compact weak bulges: accept only if the bulge dominates out to a radius larger
+   than 1 PSF FWHM (use r_disco_domina_arcsec from galfitm_bd_filtrado.csv). If the
+   profiles cross inside 1 FWHM, classify as single component.
+3. Low-n disc-shaped bulge: accept if R_e,b/R_e,d < 0.5 (possible pseudobulge).
+   Single component only if R_e are similar AND the "bulge" holds > 50% of the light.
+Do NOT start step 2 yet. First I will classify 50 new random galaxies myself; then
+classify those same 50 blind with these rules and report the confusion matrix and
+kappa again.
+```
+
+**Mensaje 3 — corrección del filtro y revisión de las reglas.** Claude Code
+encontró que `filtro_una_componente.py` tomaba `RE_B_FWHM` como FWHM de la PSF
+(ver *Correcciones de código*, abajo).
+
+```
+Thanks, good catches. Before the second round:
+1. Fix the FWHM column bug in filtro_una_componente.py so it uses FWHM_PSF, rerun it,
+   and report what changed (sin_cruce, disco_duplicado, r_disco_domina_arcsec).
+   Do not decide those 12 galaxies by eye; use the corrected radius.
+2. Revise rule 2: single component only if the profiles cross inside 1 FWHM AND
+   B/T < 0.2. If B/T >= 0.2 and they cross inside 1 FWHM, accept it as an unresolved
+   bulge (B/T usable, bulge size is an upper limit).
+3. Rule 1 (bars) is a visual criterion, not a threshold: reject only when the figure
+   shows that the "bulge" component is the bar itself.
+4. disco_puro galaxies are single component by definition: for them, only decide
+   whether the single-component fit is good (3) or bad (0). Rule 2 does not apply.
+5. List the calibration galaxies where the revised rules disagree with my decision,
+   so I can review them and either change my decision or the rule.
+The second round will use the default mixed selection. Still do not start step 2.
+```
+
+**Mensaje 4 — decisiones sobre las reglas.** Antes se guardó una copia de las
+decisiones originales (`inspeccion_visual_ronda1.csv`) y se revisaron a mano las
+25 galaxias en conflicto.
+
+```
+Decisions on the rules:
+1. Rule 3: keep R_e,b/R_e,d >= 0.5 as "similar R_e". Low-n bulges (n_b < ~0.6) with
+   similar R_e and B/T > 0.5 are single component.
+2. Rule 2: the "unresolved bulge" branch applies only to compact bulges
+   (R_e,b/R_e,d < 0.5). Extended "bulges" crossing inside 1 FWHM: decide visually,
+   usually as a split disc (single component).
+3. Rule 2 takes precedence over rule 3.
+4. Weak needle components in discs with B/T < ~0.11: single component, not rejected.
+I reviewed the 25 calibration galaxies and updated my decisions (my original round-1
+decisions are saved in inspeccion_visual_ronda1.csv; use that file for the round-1
+kappa).
+```
+
+**Mensaje 5 — barras, reglas 3 y 4 como guía, y arreglo del inspector.**
+
+```
+Correction about bars: I do reject for bars sometimes (739160573106737611 and
+739163802922149219). My rule: if the "bulge" component is the bar, accept with flag b
+(these galaxies will be excluded from the bulge analysis). If the "disc" component
+fits the bar, or the residual shows the fit is broken, reject.
+I kept 739156656096571847 and 772395442360045399 as accepted, so do not apply rules
+3 and 4 as hard thresholds; use them as guidance and decide those cases from the figure.
+Also patch inspeccion_visual_bd.py to re-read and merge before each save (by objectId,
+keeping the most recent decision per galaxy), tested on a copy of the file.
+```
+
+**Mensaje 6 — 2.ª ronda a ciegas.**
+
+```
+I have finished classifying 50 new galaxies. Run the blind second round:
+1. Take as the round-2 set the objectIds in inspeccion_visual.csv that are not in the
+   calibration list. Tell me how many you find and their categoria_bd.
+2. Generate their figures with --limpia so my decisions are not printed on them.
+   Do NOT read my visual, visual_ok or visual_etiquetas columns for these galaxies
+   until you have classified all of them.
+3. Classify them with the final rules.
+4. Then compare: confusion matrix, Cohen's kappa, agreement excluding uncertain, and
+   accepted vs. rest, plus the list of disagreements with your reasoning. Report it
+   also split by categoria_bd (bd_ok, bulbo_no_resuelto, disco_puro).
+Save your round-2 calls to calibracion_claude_ronda2.csv. Still do not start step 2.
+```
+
+**Mensaje 7 — aprobación y paso 2.**
+
+```
+Round 2 approved. Before step 2:
+- 780665900104701331 and 792329931769003310 were slips; I will correct them to single
+  component (3). Keep the rules as written.
+- Rule 2 tolerance: if the crossing radius is within ±10% of 1 FWHM, decide from the
+  figure instead of the threshold.
+- Reject only when the fit is plainly unusable. Otherwise keep your decision and use
+  flags (v neighbour, e artefact, s structure).
+- Flag b only when the bar is evident: galaxies with flag b will be excluded from the
+  bulge analysis, so over-flagging removes valid galaxies.
+Start step 2 on the remaining galaxies, in saved batches of ~50, writing only to
+inspeccion_visual_claude.csv (clasificador=claude, short note per galaxy). Do not
+modify my inspeccion_visual.csv. At the end, give me:
+- all your rejected and uncertain galaxies,
+- all galaxies with flag b,
+- a random sample of 50 of the rest (fixed seed),
+as separate CSVs I can open with inspeccion_visual_bd.py --ids, plus the auto-classified
+check of 20 (step 3 of the original plan).
+```
+
+**Mensaje 8 — 3.ª ronda y columna final.** (Primero se revisó a mano la muestra
+de 50 al azar, solo con el inspector, sin abrir el CSV con las decisiones de Claude.)
+
+```
+I have reviewed your step-2 samples in the inspector; my decisions are now in
+inspeccion_visual.csv. Some lists I may have reviewed only partly, so first tell me
+how many galaxies of each review file are now in my CSV.
+1. Round 3: compare my decisions with yours on revisar_claude_muestra50.csv: confusion
+   matrix, Cohen's kappa (all classes and accepted vs. rest), disagreements with your
+   reasoning, and agreement split by the six parallel passes.
+2. For the bar-flagged galaxies and the 13 rejected/uncertain that I reviewed: how many
+   I changed, and in which direction. For bars, also whether I kept or removed flag b.
+3. Extend inspeccion_visual_bd.py --unir (keep the current behaviour as default) with
+   an option that writes:
+   - visual_ok_final: my decision if it exists, otherwise Claude's, otherwise the
+     automatic single-component class from filtro_una_componente.py (3);
+   - visual_fuente: 'humana', 'claude' or 'auto';
+   - visual_etiquetas_final with the same priority.
+   Test it on a copy of the tables first.
+Do not modify inspeccion_visual.csv.
+```
+
+**Mensaje 9 — disco_puro, origen de las "una componente" y lista de barras.**
+
+```
+I reviewed the 13 rejected/uncertain galaxies (revisar_claude_rechazadas_dudosas.csv);
+my decisions are in inspeccion_visual.csv. Before merging:
+1. disco_puro: when I accept a disco_puro, I mean "the single-component fit is good".
+   In --final, map visual_ok = 1 to 3 for disco_puro galaxies (mine and yours).
+2. Rule 3 split-disc branch: across rounds I consistently accept low-n bulges with
+   similar R_e and B/T > 0.5, and you call them single. Count how many of your 1,331
+   calls are single component mainly because of this branch (n_b < ~1,
+   R_e,b/R_e,d >= 0.5, B/T > 0.5), and how many are single by rule 2 with
+   B/T < 0.2. Give me both lists as CSVs, plus 10 random IDs from the first list
+   that I can review. Do not reclassify anything yet.
+3. Did you implement the re-read-and-merge-before-save patch in
+   inspeccion_visual_bd.py? Confirm.
+4. Make revisar_claude_barra20.csv with 20 random galaxies (fixed seed) from
+   revisar_claude_barra.csv, so I can review them.
+5. Compare my decisions on the 13 rejected/uncertain with yours: how many I changed
+   and in which direction.
+Do not run --unir on the real tables yet.
+```
+
+**Mensaje 10 — disco partido según el criterio humano y muestra "tipo elíptica".**
+
+```
+Thanks.
+1. Split-disc branch: follow my criterion. Reclassify those 17 galaxies (those without
+   a decision of mine) to accepted in inspeccion_visual_claude.csv, with a note
+   "reclassified: split-disc rule follows human criterion". Report how many changed.
+2. Elliptical-like group (B/T > 0.5, n_b >= 2, your single calls): make
+   revisar_claude_eliptica15.csv with 15 random galaxies (fixed seed) that I have not
+   reviewed, so I can check whether some are S0s with a real disc.
+Do not run --unir on the real tables yet.
+```
+
+**Mensaje 11 — prueba del criterio para el grupo "tipo elíptica".**
+
+```
+I have now reviewed revisar_claude_eliptica15.csv (saved in inspeccion_visual.csv).
+1. Elliptical-like group: use the disc-excess criterion (accept if the disc is more
+   than 0.6 mag above the bulge at 2 R_e,d), not B/T < 0.63. A B/T cut would select on
+   a quantity tied to bulge mass and could bias the bulge mass-size slope.
+   First test it on my 15 new decisions (they were not used to tune the threshold)
+   and report the agreement. If it is reasonable (~80% or more), apply it in both
+   directions to your unreviewed calls in this group, with a note on each change,
+   and report how many changed. Keep a copy of the file before changing it.
+2. Bars: do not change anything. In the analysis I will test the bulge mass-size
+   relation with and without flag-b galaxies.
+3. Then, if everything is consistent, run inspeccion_visual_bd.py --unir --final on
+   the real tables (it makes .bak copies) and report the final counts per
+   visual_fuente and visual_ok_final.
+```
+
+**Mensaje 12 — unión final.** (El criterio del mensaje 11 no pasó la prueba y no
+se aplicó.)
+
+```
+Agreed: leave the elliptical-like group unchanged. Run inspeccion_visual_bd.py
+--unir --final on the real tables now and report:
+- the final counts per visual_fuente and visual_ok_final, for both tables;
+- how many galaxies with visual_ok_final = 1 have flag b (for the robustness test);
+- confirmation that the .bak copies were created.
+```
+
+### Resultados de la 2.ª ronda (a ciegas, reglas finales)
+
+52 galaxias nuevas, clasificadas primero a mano (`--orden azar --semilla 7`) y
+después por Claude con figuras `--limpia`: 29 `bd_ok`, 8 `bulbo_no_resuelto`,
+15 `disco_puro`, ninguna reasignada automáticamente. Detalle en
+`calibracion_claude_ronda2.csv`.
+
+| humana ↓ / Claude → | 1 aceptada | 3 una comp. | 0 rechazada | 2 dudosa | total |
+|---|---|---|---|---|---|
+| 1 aceptada | 16 | 4 | 1 | 0 | 21 |
+| 3 una componente | 2 | 27 | 2 | 0 | 31 |
+| 0 rechazada | 0 | 0 | 0 | 0 | 0 |
+| 2 dudosa | 0 | 0 | 0 | 0 | 0 |
+| total | 18 | 31 | 3 | 0 | 52 |
+
+| Comparación | Acuerdo | κ de Cohen |
+|---|---|---|
+| Las cuatro clases | 43/52 (83 %) | **0.66** |
+| Aceptada vs. el resto | 45/52 | 0.71 |
+| Solo `bd_ok` (29) | 23 (79 %) | 0.60 |
+| Solo `bulbo_no_resuelto` (8) | 7 (88 %) | — (casi todas en una clase) |
+| Solo `disco_puro` (15) | 13 (87 %) | — (casi todas en una clase) |
+
+Evolución del acuerdo:
+
+| Ronda | Galaxias | Reglas | κ | ¿Ciego? |
+|---|---|---|---|---|
+| 1 | 101 (`bd_ok`) | solo criterios generales | 0.51 | sí |
+| 1, recalculada | 101 | reglas finales, decisiones humanas revisadas | 0.71 | **no** |
+| 2 | 52 (mezcla real) | reglas finales | **0.66** | sí |
+
+Diferencias que quedaron: Claude rechaza más (3 contra 0, en casos que a mano se
+conservan con etiqueta), marca más barras (11 contra 5) y menos estructura
+(14 contra 21). Dos decisiones humanas contradecían las reglas y se corrigieron
+como descuidos. Esto se ajustó en el mensaje 7.
+
+### Reglas finales (inspección humana y de Claude)
+
+Se suman a la tabla de criterios de arriba.
+
+| Regla | Caso | Decisión |
+|---|---|---|
+| 1. Barras | el "bulbo" es la barra (alargado, desalineado del disco) | aceptada + `b` |
+| | el "disco" ajusta la barra, o el residuo muestra que el ajuste está roto | rechazada |
+| 2. Bulbos compactos | perfiles que se cruzan dentro de 1 FWHM (`r_disco_domina_arcsec`), B/T < 0.2 | una componente |
+| | ídem con B/T ≥ 0.2 y R_e,b/R_e,d < 0.5 | aceptada como bulbo no resuelto (R_e,b es límite superior) |
+| | ídem con R_e,b/R_e,d ≥ 0.5 | se decide con la figura (normalmente disco partido: una componente) |
+| | cruce a ±10 % de 1 FWHM | se decide con la figura |
+| 3. Bulbos de n bajo con la forma del disco (guía) | R_e,b/R_e,d < 0.5 | aceptada (posible pseudobulbo) |
+| | R_e,b/R_e,d ≥ 0.5 y B/T > 0.5 | una componente (mismo disco partido en dos) |
+| 4. Componentes aguja débiles (guía) | B/T < ~0.11 en un disco | una componente, no rechazada |
+| 5. `disco_puro` | ya es una componente | solo 3 (ajuste bueno) o 0 (malo) |
+| Prioridad | | la regla 2 manda sobre la 3 |
+| Rechazo | | solo si el ajuste es claramente inutilizable; si no, decisión + etiqueta (`v`, `e`, `s`) |
+| Etiqueta `b` | | solo con barra evidente |
+
+**En el análisis**, las galaxias con etiqueta `b` se excluyen de la relación
+masa–tamaño de los bulbos (su R_e y n pueden ser los de la barra), lo que además
+hace la muestra comparable con Méndez-Abreu et al. (2021), que no tiene barras.
+
+### Paso 2: clasificación de Claude
+
+Claude clasificó las 1381 galaxias restantes (`bd_ok`, `bulbo_no_resuelto` y
+`disco_puro`, sin las reasignadas automáticamente ni las ya revisadas a mano) en
+seis tandas paralelas con las mismas reglas, guardando por lotes de ~50
+(`paso2_claude.py`, `inspeccion_visual_claude.csv`).
+
+| `categoria_bd` | aceptada | una comp. | dudosa | rechazada | total |
+|---|---|---|---|---|---|
+| `bd_ok` | 347 | 375 | 7 | 1 | 730 |
+| `bulbo_no_resuelto` | 296 | 129 | 1 | 1 | 427 |
+| `disco_puro` | 0 | 221 | 0 | 3 | 224 |
+| total | 643 | 725 | 8 | 5 | 1381 |
+
+- Regla 2: 215 galaxias con cruce dentro de 1 FWHM y B/T < 0.2 → una componente;
+  81 bulbos compactos con B/T ≥ 0.2 → aceptadas; 52 extendidos → una componente
+  (decididos con la figura); 102 en la franja de ±10 % → decididas con la figura.
+- 101 galaxias (7 %) con `b`. Solo 5 rechazos, todos claramente inutilizables.
+- Control de las automáticas: 20 al azar de las 139, todas de acuerdo con
+  "una componente".
+
+### Control humano del paso 2
+
+**3.ª ronda: 50 al azar de las 1381** (revisadas a mano solo con el inspector,
+sin ver las decisiones de Claude):
+
+| humana ↓ / Claude → | 1 aceptada | 3 una comp. | total |
+|---|---|---|---|
+| 1 aceptada | 21 | 7 | 28 |
+| 3 una componente | 3 | 19 | 22 |
+| total | 24 | 26 | 50 |
+
+Acuerdo 40/50 (80 %), **κ = 0.60**; por categoría: `bd_ok` 20/27,
+`bulbo_no_resuelto` 14/16, `disco_puro` 6/7. Ninguna de las seis tandas se aparta
+de las demás (6/8 a 9/10, muestras demasiado chicas para distinguirlas). El
+desacuerdo va en un sentido: en 7 de 10, aceptada a mano y una componente para
+Claude.
+
+**Revisiones dirigidas:**
+
+| Lista | Revisadas | Resultado |
+|---|---|---|
+| Rechazadas (5) y dudosas (8) de Claude | 13 | las 5 rechazadas, confirmadas; de las 8 dudosas, 3 rechazadas, 3 aceptadas y 2 de una componente |
+| Con `b` (20 al azar de 101) | 20 | clase cambiada en 5 y `b` quitada en 5: Claude marca barras de más en ~¼ de los casos |
+| "Tipo elíptica" (B/T > 0.5, n_b ≥ 2, una componente para Claude; 15 al azar) | 15 | las 15, de una componente: coincide con Claude |
+
+**Ajustes tras la revisión:**
+
+- **Disco partido** (n_b < 1, R_e,b/R_e,d ≥ 0.5, B/T > 0.5): en todas las rondas
+  la inspección humana los acepta y Claude los ponía de una componente. Se
+  reclasificaron como aceptadas las 14 sin decisión humana, cada una con una
+  nota. Copia previa en `inspeccion_visual_claude_antes_reclasificar.csv`.
+- **`disco_puro` aceptadas:** a mano, "aceptada" en un `disco_puro` significa
+  "el ajuste de una componente es bueno". En `visual_ok_final` se convierte en 3.
+- **Grupo "tipo elíptica":** se probó un criterio físico (aceptar si el disco
+  supera al bulbo por más de 0.6 mag a 2 R_e,d) para detectar S0 entre las de
+  una componente de Claude. En las 15 nuevas acertó solo 9 (60 %), y no se
+  aplicó. En las 30 galaxias del grupo revisadas a mano, Claude coincide en el
+  90 %, así que el grupo queda sin cambios. Un corte en B/T (< 0.63) se descartó
+  porque seleccionar por B/T, ligado a la masa del bulbo, puede sesgar la
+  pendiente masa–tamaño. Valores del exceso del disco en `exceso_disco_claude.csv`.
+- **Barras:** no se revisaron las 81 restantes. En el análisis se prueba la
+  relación masa–tamaño de los bulbos con y sin las galaxias con `b`.
+
+### Clasificación final (`--unir --final`)
+
+```bash
+python3 inspeccion_visual_bd.py --unir --final
+```
+
+Agrega a `galfitm_bd_filtrado.csv` y `componentes_masas.csv`:
+
+| Columna | Contenido |
+|---|---|
+| `visual`, `visual_ok`, `visual_etiquetas` | solo las decisiones humanas (como `--unir`) |
+| `visual_ok_final` | decisión humana; si no hay, la de Claude; si no, la automática (3) |
+| `visual_fuente` | `humana`, `claude` o `auto` |
+| `visual_etiquetas_final` | etiquetas con la misma prioridad (la barra aparece como `barra`) |
+
+**El análisis usa `visual_ok_final`.** Con `--unir` sin `--final` se quitan las
+tres columnas finales. Los `.bak` se escriben solo la primera vez (versiones
+anteriores a cualquier unión).
+
+`componentes_masas.csv` (1287 galaxias):
+
+| `visual_fuente` | 0 rechazada | 1 aceptada | 3 una comp. | total |
+|---|---|---|---|---|
+| humana | 12 | 99 | 104 | 215 |
+| claude | 0 | 459 | 508 | 967 |
+| auto | 0 | 0 | 105 | 105 |
+| total | 12 | 558 | 717 | 1287 |
+
+`galfitm_bd_filtrado.csv` (4072 galaxias): 251 humanas, 1283 de Claude, 138
+automáticas y 2400 sin clase (categorías que no se inspeccionan: `fallida`,
+`invertida`, etc.); en total 735 aceptadas, 923 de una componente y 14 rechazadas.
+Ninguna queda como dudosa.
+
+Aceptadas con `b`: 74 de 558 en `componentes_masas.csv` (13 %; 51 de Claude, 23
+humanas), que son las que se quitan en la prueba de robustez.
+
+### Resumen para el paper
+
+| Ronda | Galaxias | κ (4 clases) | Acuerdo |
+|---|---|---|---|
+| 1 (a ciegas, criterios generales) | 101 | 0.51 | 70 % |
+| 2 (a ciegas, reglas finales) | 52 | 0.66 | 83 % |
+| 3 (a ciegas, 50 al azar del paso 2) | 50 | 0.60 | 80 % |
+
+De las 1287 galaxias de `componentes_masas.csv`, el 17 % tiene decisión humana,
+el 75 % de Claude y el 8 % automática.
+
+### Correcciones de código hechas durante la calibración
+
+| Script | Problema | Arreglo |
+|---|---|---|
+| `inspeccion_visual_bd.py` | fallaba con galaxias de borde todo en ceros (isofotas) | respaldo de 3 líneas para estimar el ruido |
+| `filtro_una_componente.py` | tomaba `RE_B_FWHM` como FWHM de la PSF: `r_disco_domina_arcsec` se buscaba desde ~0.14″ | usa `FWHM_PSF`. Ninguna categoría cambió (64 `sin_cruce` y 75 `disco_duplicado`, las mismas); cambió `r_disco_domina_arcsec` y, en 13 galaxias, si el cruce cae dentro de 1 FWHM |
+| `inspeccion_visual_bd.py` | con dos ventanas abiertas, una podía sobrescribir lo que guardó la otra | cada decisión pasa por `guardar_decision`, que vuelve a leer el CSV y cambia solo la fila de esa galaxia; ya no se guarda la tabla entera al cerrar |
+| `inspeccion_visual_bd.py` | `--unir` solo usaba las decisiones humanas | opción `--final` (ver *Clasificación final*); sin ella, la salida es idéntica a la anterior |
+| `paso2_claude.py` | rearmar `inspeccion_visual_claude.csv` desde los lotes desharía la reclasificación del disco partido | se niega a rearmarlo |
+
+---
+
+## Aplicar a la muestra completa
+
+Todo lo anterior se hizo con una **submuestra** (`galaxias_1_9` +
+`galaxias_10_22`). Al sumar carpetas nuevas:
+
+1. **Ajustes y cortes** (pasos 1 a 8): `python3 actualizar_todo.py --nproc 3`.
+   Como algunos umbrales de `procesar_muestra.py` dependen de la población, unas
+   pocas galaxias pueden entrar o salir de A + B. Las que salen conservan su
+   clasificación visual en los CSV, pero `--unir` solo la pega a las galaxias que
+   siguen en las tablas.
+2. **Clasificación lógica** (pasos 9, 10 y 12, y el 11 si se usa):
+   ```bash
+   python3 leer_output_bd.py
+   python3 filtro_bd.py
+   python3 filtro_una_componente.py
+   ```
+   Los umbrales de estos dos filtros son fijos, así que las galaxias ya
+   clasificadas no cambian de categoría al sumar otras.
+3. **Ronda de control a ciegas**, antes de que Claude clasifique las nuevas:
+   clasificar a mano 30–50 galaxias **de las carpetas nuevas** (`--orden azar`
+   con otra semilla) y pedir a Claude la misma comparación. Las carpetas nuevas
+   pueden venir de zonas de DP2 con otra profundidad o PSF, así que el κ de la
+   submuestra no se puede dar por hecho.
+4. **Clasificación de las nuevas por Claude**: solo las que no estén en
+   `inspeccion_visual.csv` ni en `inspeccion_visual_claude.csv`, con las mismas
+   reglas, agregando al mismo archivo.
+5. **Control humano**: el mismo esquema (rechazadas, dudosas, `b` y 50 al azar)
+   sobre las nuevas.
+6. `python3 inspeccion_visual_bd.py --unir --final`. Repetirlo también si se
+   vuelve a correr `filtro_bd.py` o `filtro_una_componente.py`.
+
+Mensaje para Claude Code al sumar carpetas (la sesión nueva no recuerda las
+anteriores, así que lleva todo el contexto):
+
+```
+You will act as my visual classifier for GalfitM bulge+disc decompositions, continuing
+work done earlier on a subsample. Read README.md, section "Paso 14", first: it has the
+classification codes, the general criteria, the final rules and the calibration
+results. Apply exactly those rules.
+
+New galaxies have been added (new galaxias_* folders). Steps:
+1. CONTROL ROUND: the objectIds in analisis_galfitm/bd/filtro/inspeccion_visual.csv
+   from the new folders are my blind control set. Classify them from --limpia figures
+   WITHOUT reading my visual, visual_ok or visual_etiquetas columns, then report the
+   confusion matrix, Cohen's kappa (all classes and accepted vs. rest) and the
+   disagreements with your reasoning. STOP and show me this.
+2. If I approve, classify only the galaxies that are in neither inspeccion_visual.csv
+   nor inspeccion_visual_claude.csv (default categories, without --incluir-auto), in
+   saved batches of ~50, appending to inspeccion_visual_claude.csv with
+   clasificador=claude and a short note. Do NOT modify inspeccion_visual.csv.
+3. At the end, give me as separate CSVs: your rejected and uncertain galaxies, all
+   galaxies with flag b, and a random sample of 50 of the rest (fixed seed), plus a
+   check of 20 random auto-classified galaxies from the new folders.
+```
+
+Para el paper: el prompt completo en inglés va en un apéndice, y en métodos se
+describe el procedimiento (criterios, calibración a ciegas con el κ obtenido y
+fracción revisada a mano).
 
 ---
 
@@ -529,7 +1141,7 @@ carpeta o un nivel arriba) y corre solo lo pendiente:
 3. statmorph y bulbo + disco **solo** para las A + B que no los tienen;
 4. une los resultados de statmorph.
 
-La clasificación bulbo + disco (pasos 9 a 13) **no** la corre: después de
+La clasificación bulbo + disco (pasos 9 a 14) **no** la corre: después de
 `actualizar_todo.py`, correrla a mano (ver arriba).
 
 ```bash
